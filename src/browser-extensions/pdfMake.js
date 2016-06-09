@@ -4,9 +4,9 @@
 'use strict';
 
 // Ensure the browser provides the level of support needed
-if ( ! Object.keys ) {
-	return;
-}
+// if ( ! Object.keys ) {
+// 	return;
+// }
 
 var PdfPrinter = require('../printer');
 var FileSaver = require('../../libs/FileSaver.js/FileSaver');
