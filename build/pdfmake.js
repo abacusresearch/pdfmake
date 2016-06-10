@@ -56,8 +56,13 @@
 	/* global BlobBuilder */
 	'use strict';
 
+	// Ensure the browser provides the level of support needed
+	// if ( ! Object.keys ) {
+	// 	return;
+	// }
+
 	var PdfPrinter = __webpack_require__(6);
-	var FileSaver = __webpack_require__(105);
+	var FileSaver = __webpack_require__(108);
 	var saveAs = FileSaver.saveAs;
 
 	var defaultClientFonts = {
@@ -101,14 +106,31 @@
 	};
 
 	Document.prototype.open = function(message) {
-		// we have to open the window immediately and store the reference
+			// we have to open the window immediately and store the reference
 		// otherwise popup blockers will stop us
 		var win = window.open('', '_blank');
-
+		
 		try {
-			this.getDataUrl(function(result) {
-				win.location.href = result;
-			});
+			this.getBuffer(function (result) {
+				var blob;
+				try {
+					blob = new Blob([result], { type: 'application/pdf' });
+				} catch (e) {
+					// Old browser which can't handle it without making it an byte array (ie10) 
+					if (e.name == "InvalidStateError") {
+						var byteArray = new Uint8Array(result);
+						blob = new Blob([byteArray.buffer], { type: 'application/pdf' });
+					}
+				}
+				
+				if (blob) {
+					var urlCreator = window.URL || window.webkitURL;
+					var pdfUrl = urlCreator.createObjectURL( blob );
+					win.location.href = pdfUrl;
+				} else {
+					throw 'Could not generate blob';
+				}
+			},  { autoPrint: false });
 		} catch(e) {
 			win.close();
 			throw e;
@@ -117,21 +139,35 @@
 
 
 	Document.prototype.print = function() {
-	  this.getDataUrl(function(dataUrl) {
-	    var iFrame = document.createElement('iframe');
-	    iFrame.style.position = 'absolute';
-	    iFrame.style.left = '-99999px';
-	    iFrame.src = dataUrl;
-	    iFrame.onload = function() {
-	      function removeIFrame(){
-	        document.body.removeChild(iFrame);
-	        document.removeEventListener('click', removeIFrame);
-	      }
-	      document.addEventListener('click', removeIFrame, false);
-	    };
-
-	    document.body.appendChild(iFrame);
-	  }, { autoPrint: true });
+			// we have to open the window immediately and store the reference
+		// otherwise popup blockers will stop us
+		var win = window.open('', '_blank');
+		
+		try {
+			this.getBuffer(function (result) {
+				var blob;
+				try {
+					blob = new Blob([result], { type: 'application/pdf' });
+				} catch (e) {
+					// Old browser which can't handle it without making it an byte array (ie10) 
+					if (e.name == "InvalidStateError") {
+						var byteArray = new Uint8Array(result);
+						blob = new Blob([byteArray.buffer], { type: 'application/pdf' });
+					}
+				}
+				
+				if (blob) {
+					var urlCreator = window.URL || window.webkitURL;
+					var pdfUrl = urlCreator.createObjectURL( blob );
+					win.location.href = pdfUrl;
+				} else {
+					throw 'Could not generate blob';
+				}
+			},  { autoPrint: true });
+		} catch(e) {
+			win.close();
+			throw e;
+		}
 	};
 
 	Document.prototype.download = function(defaultFileName, cb) {
@@ -205,6 +241,8 @@
 	 * @license  MIT
 	 */
 	/* eslint-disable no-proto */
+
+	'use strict'
 
 	var base64 = __webpack_require__(3)
 	var ieee754 = __webpack_require__(4)
@@ -288,8 +326,10 @@
 	    return new Buffer(arg)
 	  }
 
-	  this.length = 0
-	  this.parent = undefined
+	  if (!Buffer.TYPED_ARRAY_SUPPORT) {
+	    this.length = 0
+	    this.parent = undefined
+	  }
 
 	  // Common case.
 	  if (typeof arg === 'number') {
@@ -420,6 +460,10 @@
 	if (Buffer.TYPED_ARRAY_SUPPORT) {
 	  Buffer.prototype.__proto__ = Uint8Array.prototype
 	  Buffer.__proto__ = Uint8Array
+	} else {
+	  // pre-set for values that may exist in the future
+	  Buffer.prototype.length = undefined
+	  Buffer.prototype.parent = undefined
 	}
 
 	function allocate (that, length) {
@@ -569,10 +613,6 @@
 	  }
 	}
 	Buffer.byteLength = byteLength
-
-	// pre-set for values that may exist in the future
-	Buffer.prototype.length = undefined
-	Buffer.prototype.parent = undefined
 
 	function slowToString (encoding, start, end) {
 	  var loweredCase = false
@@ -1969,38 +2009,10 @@
 /* 5 */
 /***/ function(module, exports) {
 
-	
-	/**
-	 * isArray
-	 */
+	var toString = {}.toString;
 
-	var isArray = Array.isArray;
-
-	/**
-	 * toString
-	 */
-
-	var str = Object.prototype.toString;
-
-	/**
-	 * Whether or not the given `val`
-	 * is an array.
-	 *
-	 * example:
-	 *
-	 *        isArray([]);
-	 *        // > true
-	 *        isArray(arguments);
-	 *        // > false
-	 *        isArray('');
-	 *        // > false
-	 *
-	 * @param {mixed} val
-	 * @return {bool}
-	 */
-
-	module.exports = isArray || function (val) {
-	  return !! val && '[object Array]' == str.call(val);
+	module.exports = Array.isArray || function (arr) {
+	  return toString.call(arr) == '[object Array]';
 	};
 
 
@@ -2017,9 +2029,9 @@
 	var LayoutBuilder = __webpack_require__(11);
 	var PdfKit = __webpack_require__(24);
 	var PDFReference = __webpack_require__(46);
-	var sizes = __webpack_require__(102);
-	var ImageMeasure = __webpack_require__(103);
-	var textDecorator = __webpack_require__(104);
+	var sizes = __webpack_require__(105);
+	var ImageMeasure = __webpack_require__(106);
+	var textDecorator = __webpack_require__(107);
 	var FontProvider = __webpack_require__(9);
 
 	_.noConflict();
@@ -2094,13 +2106,14 @@
 		options = options || {};
 
 		var pageSize = pageSize2widthAndHeight(docDefinition.pageSize || 'a4');
+	  var pdfKitOptions = _.assign(docDefinition.pdfKit || {}, { size: [ pageSize.width, pageSize.height ] });
 
 	  if(docDefinition.pageOrientation === 'landscape') {
 	    pageSize = { width: pageSize.height, height: pageSize.width};
 	  }
 		pageSize.orientation = docDefinition.pageOrientation === 'landscape' ? docDefinition.pageOrientation : 'portrait';
 
-		this.pdfKitDoc = new PdfKit({ size: [ pageSize.width, pageSize.height ], compress: false});
+		this.pdfKitDoc = new PdfKit(pdfKitOptions);
 		this.pdfKitDoc.info.Producer = 'pdfmake';
 		this.pdfKitDoc.info.Creator = 'pdfmake';
 		
@@ -2113,6 +2126,7 @@
 			this.pdfKitDoc.info.Author = docDefinition.info.author ? docDefinition.info.author : null;
 			this.pdfKitDoc.info.Subject = docDefinition.info.subject ? docDefinition.info.subject : null;
 			this.pdfKitDoc.info.Keywords = docDefinition.info.keywords ? docDefinition.info.keywords : null;
+			this.pdfKitDoc.info.CreationDate = docDefinition.info.creationDate ? docDefinition.info.creationDate : null;
 		}
 		
 		this.fontProvider = new FontProvider(this.fontDescriptors, this.pdfKitDoc);
@@ -2394,7 +2408,7 @@
 
 
 	/* temporary browser extension */
-	PdfPrinter.prototype.fs = __webpack_require__(44);
+	PdfPrinter.prototype.fs = __webpack_require__(43);
 
 
 /***/ },
@@ -15917,6 +15931,10 @@
 			for(row = 0, rows = node.table.body.length; row < rows; row++) {
 				var rowData = node.table.body[row];
 				var data = rowData[col];
+				if(data === undefined){
+					console.error('Malformed table row ', rowData, 'in node ', node);
+					throw 'Malformed table row, a cell is undefined.';
+				}
 				if (!data._span) {
 					var _this = this;
 					data = rowData[col] = this.styleStack.auto(data, measureCb(this, data));
@@ -16348,6 +16366,7 @@
 			var decorationStyle = getStyleProperty(item, styleContextStack, 'decorationStyle', null);
 			var background = getStyleProperty(item, styleContextStack, 'background', null);
 			var lineHeight = getStyleProperty(item, styleContextStack, 'lineHeight', 1);
+			var link = getStyleProperty(item, styleContextStack, 'link', null);
 
 			var font = fontProvider.provideFont(fontName, bold, italics);
 
@@ -16379,6 +16398,7 @@
 			item.decorationColor = decorationColor;
 			item.decorationStyle = decorationStyle;
 			item.background = background;
+			item.link = link;
 		});
 
 		return normalized;
@@ -18615,7 +18635,7 @@
 /* 24 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.7.1
+	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.10.0
 
 	/*
 	PDFDocument - represents an entire PDF document
@@ -18623,89 +18643,125 @@
 	 */
 
 	(function() {
-	  var PDFDocument, PDFObject, PDFPage, PDFReference, fs, stream,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	  var PDFDocument, PDFEmbeddedFiles, PDFObject, PDFPage, PDFReference, fs, stream, utf8,
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
 	  stream = __webpack_require__(25);
 
-	  fs = __webpack_require__(44);
+	  fs = __webpack_require__(43);
 
-	  PDFObject = __webpack_require__(45);
+	  PDFObject = __webpack_require__(44);
 
 	  PDFReference = __webpack_require__(46);
 
-	  PDFPage = __webpack_require__(64);
+	  PDFEmbeddedFiles = __webpack_require__(64);
 
-	  PDFDocument = (function(_super) {
+	  PDFPage = __webpack_require__(66);
+
+	  utf8 = __webpack_require__(65);
+
+	  PDFDocument = (function(superClass) {
 	    var mixin;
 
-	    __extends(PDFDocument, _super);
+	    extend(PDFDocument, superClass);
 
-	    function PDFDocument(options) {
-	      var key, val, _ref, _ref1;
-	      this.options = options != null ? options : {};
+	    function PDFDocument(options1) {
+	      var key, ref1, ref2, val;
+	      this.options = options1 != null ? options1 : {};
 	      PDFDocument.__super__.constructor.apply(this, arguments);
 	      this.version = 1.3;
-	      this.compress = (_ref = this.options.compress) != null ? _ref : true;
+	      this.compress = (ref1 = this.options.compress) != null ? ref1 : true;
 	      this._pageBuffer = [];
 	      this._pageBufferStart = 0;
 	      this._offsets = [];
 	      this._waiting = 0;
 	      this._ended = false;
 	      this._offset = 0;
-	      this._root = this.ref({
-	        Type: 'Catalog',
-	        Pages: this.ref({
-	          Type: 'Pages',
-	          Count: 0,
-	          Kids: []
-	        })
-	      });
 	      this.page = null;
 	      this.initColor();
 	      this.initVector();
 	      this.initFonts();
 	      this.initText();
 	      this.initImages();
+	      this.initPdfa();
 	      this.info = {
 	        Producer: 'PDFKit',
 	        Creator: 'PDFKit',
 	        CreationDate: new Date()
 	      };
 	      if (this.options.info) {
-	        _ref1 = this.options.info;
-	        for (key in _ref1) {
-	          val = _ref1[key];
+	        ref2 = this.options.info;
+	        for (key in ref2) {
+	          val = ref2[key];
 	          this.info[key] = val;
 	        }
 	      }
+	      this._root = this.catalog();
 	      this._write("%PDF-" + this.version);
 	      this._write("%\xFF\xFF\xFF\xFF");
-	      this.addPage();
+	      if (this.options.autoFirstPage !== false) {
+	        this.addPage();
+	      }
 	    }
 
 	    mixin = function(methods) {
-	      var method, name, _results;
-	      _results = [];
+	      var method, name, results;
+	      results = [];
 	      for (name in methods) {
 	        method = methods[name];
-	        _results.push(PDFDocument.prototype[name] = method);
+	        results.push(PDFDocument.prototype[name] = method);
 	      }
-	      return _results;
+	      return results;
 	    };
-
-	    mixin(__webpack_require__(65));
 
 	    mixin(__webpack_require__(67));
 
 	    mixin(__webpack_require__(69));
 
-	    mixin(__webpack_require__(89));
+	    mixin(__webpack_require__(71));
 
-	    mixin(__webpack_require__(96));
+	    mixin(__webpack_require__(91));
 
-	    mixin(__webpack_require__(101));
+	    mixin(__webpack_require__(98));
+
+	    mixin(__webpack_require__(103));
+
+	    mixin(__webpack_require__(104));
+
+	    PDFDocument.prototype.catalog = function() {
+	      var catalog;
+	      catalog = this.ref({
+	        Type: 'Catalog',
+	        Pages: this.ref({
+	          Type: 'Pages',
+	          Count: 0,
+	          Kids: []
+	        }),
+	        Names: this.nameDictionary()
+	      });
+	      if (this.options.pdfa) {
+	        catalog.data.Metadata = this.pdfaMetadata();
+	        catalog.data.OutputIntents = this.pdfaOutputIntents();
+	      }
+	      if (this.options.pdfa && this.options.embeddedFiles) {
+	        catalog.data.AF = this.embeddedFiles().associatedFiles();
+	      }
+	      return catalog;
+	    };
+
+	    PDFDocument.prototype.nameDictionary = function() {
+	      var dictionary;
+	      dictionary = {};
+	      if (this.options.embeddedFiles) {
+	        dictionary.EmbeddedFiles = this.embeddedFiles().names();
+	      }
+	      return dictionary;
+	    };
+
+	    PDFDocument.prototype.embeddedFiles = function() {
+	      return this._embeddedFiles || (this._embeddedFiles = new PDFEmbeddedFiles(this, this.options.embeddedFiles));
+	    };
 
 	    PDFDocument.prototype.addPage = function(options) {
 	      var pages;
@@ -18724,6 +18780,7 @@
 	      this.y = this.page.margins.top;
 	      this._ctm = [1, 0, 0, 1, 0, 0];
 	      this.transform(1, 0, 0, -1, 0, this.page.height);
+	      this.emit('pageAdded');
 	      return this;
 	    };
 
@@ -18743,19 +18800,22 @@
 	    };
 
 	    PDFDocument.prototype.flushPages = function() {
-	      var page, pages, _i, _len;
+	      var i, len, page, pages;
 	      pages = this._pageBuffer;
 	      this._pageBuffer = [];
 	      this._pageBufferStart += pages.length;
-	      for (_i = 0, _len = pages.length; _i < _len; _i++) {
-	        page = pages[_i];
+	      for (i = 0, len = pages.length; i < len; i++) {
+	        page = pages[i];
 	        page.end();
 	      }
 	    };
 
-	    PDFDocument.prototype.ref = function(data) {
+	    PDFDocument.prototype.ref = function(data, options) {
 	      var ref;
-	      ref = new PDFReference(this, this._offsets.length + 1, data);
+	      if (options == null) {
+	        options = {};
+	      }
+	      ref = new PDFReference(this, this._offsets.length + 1, data, options);
 	      this._offsets.push(null);
 	      this._waiting++;
 	      return ref;
@@ -18798,21 +18858,38 @@
 	    };
 
 	    PDFDocument.prototype.end = function() {
-	      var font, key, name, val, _ref, _ref1;
+	      var font, i, key, len, name, outputIntent, ref1, ref2, ref3, val;
 	      this.flushPages();
 	      this._info = this.ref();
-	      _ref = this.info;
-	      for (key in _ref) {
-	        val = _ref[key];
+	      ref1 = this.info;
+	      for (key in ref1) {
+	        val = ref1[key];
 	        if (typeof val === 'string') {
 	          val = new String(val);
 	        }
 	        this._info.data[key] = val;
 	      }
 	      this._info.end();
-	      _ref1 = this._fontFamilies;
-	      for (name in _ref1) {
-	        font = _ref1[name];
+	      if (this.options.embeddedFiles) {
+	        this.embeddedFiles().end();
+	      }
+	      if (this._root.data.AF) {
+	        this._root.data.AF.end();
+	      }
+	      if (this._root.data.Metadata) {
+	        this._root.data.Metadata.end();
+	      }
+	      if (this._root.data.OutputIntents) {
+	        ref2 = this._root.data.OutputIntents;
+	        for (i = 0, len = ref2.length; i < len; i++) {
+	          outputIntent = ref2[i];
+	          outputIntent.data.DestOutputProfile.end();
+	          outputIntent.end();
+	        }
+	      }
+	      ref3 = this._fontFamilies;
+	      for (name in ref3) {
+	        font = ref3[name];
 	        font.embed();
 	      }
 	      this._root.end();
@@ -18825,14 +18902,14 @@
 	    };
 
 	    PDFDocument.prototype._finalize = function(fn) {
-	      var offset, xRefOffset, _i, _len, _ref;
+	      var i, len, offset, ref1, xRefOffset;
 	      xRefOffset = this._offset;
 	      this._write("xref");
 	      this._write("0 " + (this._offsets.length + 1));
 	      this._write("0000000000 65535 f ");
-	      _ref = this._offsets;
-	      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-	        offset = _ref[_i];
+	      ref1 = this._offsets;
+	      for (i = 0, len = ref1.length; i < len; i++) {
+	        offset = ref1[i];
 	        offset = ('0000000000' + offset).slice(-10);
 	        this._write(offset + ' 00000 n ');
 	      }
@@ -18840,7 +18917,8 @@
 	      this._write(PDFObject.convert({
 	        Size: this._offsets.length + 1,
 	        Root: this._root,
-	        Info: this._info
+	        Info: this._info,
+	        ID: this.trailerId()
 	      }));
 	      this._write('startxref');
 	      this._write("" + xRefOffset);
@@ -18850,6 +18928,21 @@
 
 	    PDFDocument.prototype.toString = function() {
 	      return "[object PDFDocument]";
+	    };
+
+	    PDFDocument.prototype.trailerId = function() {
+	      var id;
+	      id = new Buffer(this.fileIdentifier());
+	      return [id, id];
+	    };
+
+	    PDFDocument.prototype.fileIdentifier = function() {
+	      return this._fileIdentifier || (this._fileIdentifier = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+	        var r, v;
+	        r = Math.random() * 16 | 0;
+	        v = c === 'x' ? r : r & 0x3 | 0x8;
+	        return v.toString(16);
+	      }));
 	    };
 
 	    return PDFDocument;
@@ -18894,10 +18987,10 @@
 
 	inherits(Stream, EE);
 	Stream.Readable = __webpack_require__(28);
-	Stream.Writable = __webpack_require__(40);
-	Stream.Duplex = __webpack_require__(41);
-	Stream.Transform = __webpack_require__(42);
-	Stream.PassThrough = __webpack_require__(43);
+	Stream.Writable = __webpack_require__(39);
+	Stream.Duplex = __webpack_require__(40);
+	Stream.Transform = __webpack_require__(41);
+	Stream.PassThrough = __webpack_require__(42);
 
 	// Backwards-compat with node 0.4.x
 	Stream.Stream = Stream;
@@ -19082,11 +19175,18 @@
 	        break;
 	      // slower
 	      default:
-	        args = Array.prototype.slice.call(arguments, 1);
+	        len = arguments.length;
+	        args = new Array(len - 1);
+	        for (i = 1; i < len; i++)
+	          args[i - 1] = arguments[i];
 	        handler.apply(this, args);
 	    }
 	  } else if (isObject(handler)) {
-	    args = Array.prototype.slice.call(arguments, 1);
+	    len = arguments.length;
+	    args = new Array(len - 1);
+	    for (i = 1; i < len; i++)
+	      args[i - 1] = arguments[i];
+
 	    listeners = handler.slice();
 	    len = listeners.length;
 	    for (i = 0; i < len; i++)
@@ -19124,6 +19224,7 @@
 
 	  // Check for listener leak
 	  if (isObject(this._events[type]) && !this._events[type].warned) {
+	    var m;
 	    if (!isUndefined(this._maxListeners)) {
 	      m = this._maxListeners;
 	    } else {
@@ -19245,7 +19346,7 @@
 
 	  if (isFunction(listeners)) {
 	    this.removeListener(type, listeners);
-	  } else if (listeners) {
+	  } else {
 	    // LIFO order
 	    while (listeners.length)
 	      this.removeListener(type, listeners[listeners.length - 1]);
@@ -19266,20 +19367,15 @@
 	  return ret;
 	};
 
-	EventEmitter.prototype.listenerCount = function(type) {
-	  if (this._events) {
-	    var evlistener = this._events[type];
-
-	    if (isFunction(evlistener))
-	      return 1;
-	    else if (evlistener)
-	      return evlistener.length;
-	  }
-	  return 0;
-	};
-
 	EventEmitter.listenerCount = function(emitter, type) {
-	  return emitter.listenerCount(type);
+	  var ret;
+	  if (!emitter._events || !emitter._events[type])
+	    ret = 0;
+	  else if (isFunction(emitter._events[type]))
+	    ret = 1;
+	  else
+	    ret = emitter._events[type].length;
+	  return ret;
 	};
 
 	function isFunction(arg) {
@@ -19332,17 +19428,121 @@
 /* 28 */
 /***/ function(module, exports, __webpack_require__) {
 
-	exports = module.exports = __webpack_require__(29);
+	/* WEBPACK VAR INJECTION */(function(process) {exports = module.exports = __webpack_require__(30);
 	exports.Stream = __webpack_require__(25);
 	exports.Readable = exports;
-	exports.Writable = __webpack_require__(36);
-	exports.Duplex = __webpack_require__(35);
-	exports.Transform = __webpack_require__(38);
-	exports.PassThrough = __webpack_require__(39);
+	exports.Writable = __webpack_require__(35);
+	exports.Duplex = __webpack_require__(34);
+	exports.Transform = __webpack_require__(37);
+	exports.PassThrough = __webpack_require__(38);
+	if (!process.browser && process.env.READABLE_STREAM === 'disable') {
+	  module.exports = __webpack_require__(25);
+	}
 
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(29)))
 
 /***/ },
 /* 29 */
+/***/ function(module, exports) {
+
+	// shim for using process in browser
+
+	var process = module.exports = {};
+	var queue = [];
+	var draining = false;
+	var currentQueue;
+	var queueIndex = -1;
+
+	function cleanUpNextTick() {
+	    if (!draining || !currentQueue) {
+	        return;
+	    }
+	    draining = false;
+	    if (currentQueue.length) {
+	        queue = currentQueue.concat(queue);
+	    } else {
+	        queueIndex = -1;
+	    }
+	    if (queue.length) {
+	        drainQueue();
+	    }
+	}
+
+	function drainQueue() {
+	    if (draining) {
+	        return;
+	    }
+	    var timeout = setTimeout(cleanUpNextTick);
+	    draining = true;
+
+	    var len = queue.length;
+	    while(len) {
+	        currentQueue = queue;
+	        queue = [];
+	        while (++queueIndex < len) {
+	            if (currentQueue) {
+	                currentQueue[queueIndex].run();
+	            }
+	        }
+	        queueIndex = -1;
+	        len = queue.length;
+	    }
+	    currentQueue = null;
+	    draining = false;
+	    clearTimeout(timeout);
+	}
+
+	process.nextTick = function (fun) {
+	    var args = new Array(arguments.length - 1);
+	    if (arguments.length > 1) {
+	        for (var i = 1; i < arguments.length; i++) {
+	            args[i - 1] = arguments[i];
+	        }
+	    }
+	    queue.push(new Item(fun, args));
+	    if (queue.length === 1 && !draining) {
+	        setTimeout(drainQueue, 0);
+	    }
+	};
+
+	// v8 likes predictible objects
+	function Item(fun, array) {
+	    this.fun = fun;
+	    this.array = array;
+	}
+	Item.prototype.run = function () {
+	    this.fun.apply(null, this.array);
+	};
+	process.title = 'browser';
+	process.browser = true;
+	process.env = {};
+	process.argv = [];
+	process.version = ''; // empty string to avoid regexp issues
+	process.versions = {};
+
+	function noop() {}
+
+	process.on = noop;
+	process.addListener = noop;
+	process.once = noop;
+	process.off = noop;
+	process.removeListener = noop;
+	process.removeAllListeners = noop;
+	process.emit = noop;
+
+	process.binding = function (name) {
+	    throw new Error('process.binding is not supported');
+	};
+
+	process.cwd = function () { return '/' };
+	process.chdir = function (dir) {
+	    throw new Error('process.chdir is not supported');
+	};
+	process.umask = function() { return 0; };
+
+
+/***/ },
+/* 30 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(process) {// Copyright Joyent, Inc. and other Node contributors.
@@ -19391,14 +19591,14 @@
 
 	/*<replacement>*/
 	var util = __webpack_require__(32);
-	util.inherits = __webpack_require__(33);
+	util.inherits = __webpack_require__(27);
 	/*</replacement>*/
 
 	var StringDecoder;
 
 
 	/*<replacement>*/
-	var debug = __webpack_require__(34);
+	var debug = __webpack_require__(33);
 	if (debug && debug.debuglog) {
 	  debug = debug.debuglog('stream');
 	} else {
@@ -19410,7 +19610,7 @@
 	util.inherits(Readable, Stream);
 
 	function ReadableState(options, stream) {
-	  var Duplex = __webpack_require__(35);
+	  var Duplex = __webpack_require__(34);
 
 	  options = options || {};
 
@@ -19471,14 +19671,14 @@
 	  this.encoding = null;
 	  if (options.encoding) {
 	    if (!StringDecoder)
-	      StringDecoder = __webpack_require__(37).StringDecoder;
+	      StringDecoder = __webpack_require__(36).StringDecoder;
 	    this.decoder = new StringDecoder(options.encoding);
 	    this.encoding = options.encoding;
 	  }
 	}
 
 	function Readable(options) {
-	  var Duplex = __webpack_require__(35);
+	  var Duplex = __webpack_require__(34);
 
 	  if (!(this instanceof Readable))
 	    return new Readable(options);
@@ -19581,7 +19781,7 @@
 	// backwards compatibility.
 	Readable.prototype.setEncoding = function(enc) {
 	  if (!StringDecoder)
-	    StringDecoder = __webpack_require__(37).StringDecoder;
+	    StringDecoder = __webpack_require__(36).StringDecoder;
 	  this._readableState.decoder = new StringDecoder(enc);
 	  this._readableState.encoding = enc;
 	  return this;
@@ -20297,104 +20497,7 @@
 	  return -1;
 	}
 
-	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(30)))
-
-/***/ },
-/* 30 */
-/***/ function(module, exports) {
-
-	// shim for using process in browser
-
-	var process = module.exports = {};
-	var queue = [];
-	var draining = false;
-	var currentQueue;
-	var queueIndex = -1;
-
-	function cleanUpNextTick() {
-	    draining = false;
-	    if (currentQueue.length) {
-	        queue = currentQueue.concat(queue);
-	    } else {
-	        queueIndex = -1;
-	    }
-	    if (queue.length) {
-	        drainQueue();
-	    }
-	}
-
-	function drainQueue() {
-	    if (draining) {
-	        return;
-	    }
-	    var timeout = setTimeout(cleanUpNextTick);
-	    draining = true;
-
-	    var len = queue.length;
-	    while(len) {
-	        currentQueue = queue;
-	        queue = [];
-	        while (++queueIndex < len) {
-	            if (currentQueue) {
-	                currentQueue[queueIndex].run();
-	            }
-	        }
-	        queueIndex = -1;
-	        len = queue.length;
-	    }
-	    currentQueue = null;
-	    draining = false;
-	    clearTimeout(timeout);
-	}
-
-	process.nextTick = function (fun) {
-	    var args = new Array(arguments.length - 1);
-	    if (arguments.length > 1) {
-	        for (var i = 1; i < arguments.length; i++) {
-	            args[i - 1] = arguments[i];
-	        }
-	    }
-	    queue.push(new Item(fun, args));
-	    if (queue.length === 1 && !draining) {
-	        setTimeout(drainQueue, 0);
-	    }
-	};
-
-	// v8 likes predictible objects
-	function Item(fun, array) {
-	    this.fun = fun;
-	    this.array = array;
-	}
-	Item.prototype.run = function () {
-	    this.fun.apply(null, this.array);
-	};
-	process.title = 'browser';
-	process.browser = true;
-	process.env = {};
-	process.argv = [];
-	process.version = ''; // empty string to avoid regexp issues
-	process.versions = {};
-
-	function noop() {}
-
-	process.on = noop;
-	process.addListener = noop;
-	process.once = noop;
-	process.off = noop;
-	process.removeListener = noop;
-	process.removeAllListeners = noop;
-	process.emit = noop;
-
-	process.binding = function (name) {
-	    throw new Error('process.binding is not supported');
-	};
-
-	process.cwd = function () { return '/' };
-	process.chdir = function (dir) {
-	    throw new Error('process.chdir is not supported');
-	};
-	process.umask = function() { return 0; };
-
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(29)))
 
 /***/ },
 /* 31 */
@@ -20523,39 +20626,10 @@
 /* 33 */
 /***/ function(module, exports) {
 
-	if (typeof Object.create === 'function') {
-	  // implementation from standard node.js 'util' module
-	  module.exports = function inherits(ctor, superCtor) {
-	    ctor.super_ = superCtor
-	    ctor.prototype = Object.create(superCtor.prototype, {
-	      constructor: {
-	        value: ctor,
-	        enumerable: false,
-	        writable: true,
-	        configurable: true
-	      }
-	    });
-	  };
-	} else {
-	  // old school shim for old browsers
-	  module.exports = function inherits(ctor, superCtor) {
-	    ctor.super_ = superCtor
-	    var TempCtor = function () {}
-	    TempCtor.prototype = superCtor.prototype
-	    ctor.prototype = new TempCtor()
-	    ctor.prototype.constructor = ctor
-	  }
-	}
-
-
-/***/ },
-/* 34 */
-/***/ function(module, exports) {
-
 	/* (ignored) */
 
 /***/ },
-/* 35 */
+/* 34 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(process) {// Copyright Joyent, Inc. and other Node contributors.
@@ -20597,11 +20671,11 @@
 
 	/*<replacement>*/
 	var util = __webpack_require__(32);
-	util.inherits = __webpack_require__(33);
+	util.inherits = __webpack_require__(27);
 	/*</replacement>*/
 
-	var Readable = __webpack_require__(29);
-	var Writable = __webpack_require__(36);
+	var Readable = __webpack_require__(30);
+	var Writable = __webpack_require__(35);
 
 	util.inherits(Duplex, Readable);
 
@@ -20648,10 +20722,10 @@
 	  }
 	}
 
-	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(30)))
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(29)))
 
 /***/ },
-/* 36 */
+/* 35 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(process) {// Copyright Joyent, Inc. and other Node contributors.
@@ -20690,7 +20764,7 @@
 
 	/*<replacement>*/
 	var util = __webpack_require__(32);
-	util.inherits = __webpack_require__(33);
+	util.inherits = __webpack_require__(27);
 	/*</replacement>*/
 
 	var Stream = __webpack_require__(25);
@@ -20704,7 +20778,7 @@
 	}
 
 	function WritableState(options, stream) {
-	  var Duplex = __webpack_require__(35);
+	  var Duplex = __webpack_require__(34);
 
 	  options = options || {};
 
@@ -20792,7 +20866,7 @@
 	}
 
 	function Writable(options) {
-	  var Duplex = __webpack_require__(35);
+	  var Duplex = __webpack_require__(34);
 
 	  // Writable ctor is applied to Duplexes, though they're not
 	  // instanceof Writable, they're instanceof Readable.
@@ -21132,10 +21206,10 @@
 	  state.ended = true;
 	}
 
-	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(30)))
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(29)))
 
 /***/ },
-/* 37 */
+/* 36 */
 /***/ function(module, exports, __webpack_require__) {
 
 	// Copyright Joyent, Inc. and other Node contributors.
@@ -21362,7 +21436,7 @@
 
 
 /***/ },
-/* 38 */
+/* 37 */
 /***/ function(module, exports, __webpack_require__) {
 
 	// Copyright Joyent, Inc. and other Node contributors.
@@ -21431,11 +21505,11 @@
 
 	module.exports = Transform;
 
-	var Duplex = __webpack_require__(35);
+	var Duplex = __webpack_require__(34);
 
 	/*<replacement>*/
 	var util = __webpack_require__(32);
-	util.inherits = __webpack_require__(33);
+	util.inherits = __webpack_require__(27);
 	/*</replacement>*/
 
 	util.inherits(Transform, Duplex);
@@ -21577,7 +21651,7 @@
 
 
 /***/ },
-/* 39 */
+/* 38 */
 /***/ function(module, exports, __webpack_require__) {
 
 	// Copyright Joyent, Inc. and other Node contributors.
@@ -21607,11 +21681,11 @@
 
 	module.exports = PassThrough;
 
-	var Transform = __webpack_require__(38);
+	var Transform = __webpack_require__(37);
 
 	/*<replacement>*/
 	var util = __webpack_require__(32);
-	util.inherits = __webpack_require__(33);
+	util.inherits = __webpack_require__(27);
 	/*</replacement>*/
 
 	util.inherits(PassThrough, Transform);
@@ -21629,17 +21703,24 @@
 
 
 /***/ },
+/* 39 */
+/***/ function(module, exports, __webpack_require__) {
+
+	module.exports = __webpack_require__(35)
+
+
+/***/ },
 /* 40 */
 /***/ function(module, exports, __webpack_require__) {
 
-	module.exports = __webpack_require__(36)
+	module.exports = __webpack_require__(34)
 
 
 /***/ },
 /* 41 */
 /***/ function(module, exports, __webpack_require__) {
 
-	module.exports = __webpack_require__(35)
+	module.exports = __webpack_require__(37)
 
 
 /***/ },
@@ -21651,13 +21732,6 @@
 
 /***/ },
 /* 43 */
-/***/ function(module, exports, __webpack_require__) {
-
-	module.exports = __webpack_require__(39)
-
-
-/***/ },
-/* 44 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(Buffer, __dirname) {/* jslint node: true */
@@ -21706,10 +21780,10 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer, "/"))
 
 /***/ },
-/* 45 */
+/* 44 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.7.1
+	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.10.0
 
 	/*
 	PDFObject - converts JavaScript types into their corrisponding PDF types.
@@ -21717,10 +21791,10 @@
 	 */
 
 	(function() {
-	  var PDFObject, PDFReference;
+	  var PDFEscape, PDFNamedReference, PDFObject, PDFReference;
 
 	  PDFObject = (function() {
-	    var escapable, escapableRe, pad, swapBytes;
+	    var pad, swapBytes;
 
 	    function PDFObject() {}
 
@@ -21728,26 +21802,13 @@
 	      return (Array(length + 1).join('0') + str).slice(-length);
 	    };
 
-	    escapableRe = /[\n\r\t\b\f\(\)\\]/g;
-
-	    escapable = {
-	      '\n': '\\n',
-	      '\r': '\\r',
-	      '\t': '\\t',
-	      '\b': '\\b',
-	      '\f': '\\f',
-	      '\\': '\\\\',
-	      '(': '\\(',
-	      ')': '\\)'
-	    };
-
 	    swapBytes = function(buff) {
-	      var a, i, l, _i, _ref;
+	      var a, i, j, l, ref;
 	      l = buff.length;
 	      if (l & 0x01) {
 	        throw new Error("Buffer length must be even");
 	      } else {
-	        for (i = _i = 0, _ref = l - 1; _i < _ref; i = _i += 2) {
+	        for (i = j = 0, ref = l - 1; j < ref; i = j += 2) {
 	          a = buff[i];
 	          buff[i] = buff[i + 1];
 	          buff[i + 1] = a;
@@ -21757,15 +21818,13 @@
 	    };
 
 	    PDFObject.convert = function(object) {
-	      var e, i, isUnicode, items, key, out, string, val, _i, _ref;
+	      var e, i, isUnicode, items, j, key, out, ref, string, val;
 	      if (typeof object === 'string') {
-	        return '/' + object;
+	        return '/' + PDFEscape.escapeName(object);
 	      } else if (object instanceof String) {
-	        string = object.replace(escapableRe, function(c) {
-	          return escapable[c];
-	        });
+	        string = PDFEscape.escapeString(object);
 	        isUnicode = false;
-	        for (i = _i = 0, _ref = string.length; _i < _ref; i = _i += 1) {
+	        for (i = j = 0, ref = string.length; j < ref; i = j += 1) {
 	          if (string.charCodeAt(i) > 0x7f) {
 	            isUnicode = true;
 	            break;
@@ -21777,19 +21836,19 @@
 	        return '(' + string + ')';
 	      } else if (Buffer.isBuffer(object)) {
 	        return '<' + object.toString('hex') + '>';
-	      } else if (object instanceof PDFReference) {
+	      } else if (object instanceof PDFReference || object instanceof PDFNamedReference) {
 	        return object.toString();
 	      } else if (object instanceof Date) {
-	        return '(D:' + pad(object.getUTCFullYear(), 4) + pad(object.getUTCMonth(), 2) + pad(object.getUTCDate(), 2) + pad(object.getUTCHours(), 2) + pad(object.getUTCMinutes(), 2) + pad(object.getUTCSeconds(), 2) + 'Z)';
+	        return '(D:' + pad(object.getUTCFullYear(), 4) + pad(object.getUTCMonth() + 1, 2) + pad(object.getUTCDate(), 2) + pad(object.getUTCHours(), 2) + pad(object.getUTCMinutes(), 2) + pad(object.getUTCSeconds(), 2) + 'Z)';
 	      } else if (Array.isArray(object)) {
 	        items = ((function() {
-	          var _j, _len, _results;
-	          _results = [];
-	          for (_j = 0, _len = object.length; _j < _len; _j++) {
-	            e = object[_j];
-	            _results.push(PDFObject.convert(e));
+	          var k, len, results;
+	          results = [];
+	          for (k = 0, len = object.length; k < len; k++) {
+	            e = object[k];
+	            results.push(PDFObject.convert(e));
 	          }
-	          return _results;
+	          return results;
 	        })()).join(' ');
 	        return '[' + items + ']';
 	      } else if ({}.toString.call(object) === '[object Object]') {
@@ -21811,17 +21870,75 @@
 
 	  module.exports = PDFObject;
 
+	  PDFEscape = __webpack_require__(45);
+
 	  PDFReference = __webpack_require__(46);
+
+	  PDFNamedReference = __webpack_require__(63);
 
 	}).call(this);
 
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer))
 
 /***/ },
+/* 45 */
+/***/ function(module, exports) {
+
+	// Generated by CoffeeScript 1.10.0
+
+	/*
+	PDFEscape - escape PDF "Name objects" or "Strings"
+	 */
+
+	(function() {
+	  var PDFEscape;
+
+	  PDFEscape = (function() {
+	    function PDFEscape() {}
+
+	    PDFEscape.escapeString = function(s) {
+	      var escapable, escapableRe;
+	      escapableRe = /[\n\r\t\b\f\(\)\\]/g;
+	      escapable = {
+	        '\n': '\\n',
+	        '\r': '\\r',
+	        '\t': '\\t',
+	        '\b': '\\b',
+	        '\f': '\\f',
+	        '\\': '\\\\',
+	        '(': '\\(',
+	        ')': '\\)'
+	      };
+	      return s.replace(escapableRe, function(c) {
+	        return escapable[c];
+	      });
+	    };
+
+	    PDFEscape.escapeName = function(s) {
+	      var escapable, escapableRe;
+	      escapableRe = /\//g;
+	      escapable = {
+	        '/': '#2F'
+	      };
+	      return s.replace(escapableRe, function(c) {
+	        return escapable[c];
+	      });
+	    };
+
+	    return PDFEscape;
+
+	  })();
+
+	  module.exports = PDFEscape;
+
+	}).call(this);
+
+
+/***/ },
 /* 46 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.7.1
+	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.10.0
 
 	/*
 	PDFReference - represents a reference to another object in the PDF object heirarchy
@@ -21829,20 +21946,24 @@
 	 */
 
 	(function() {
-	  var PDFObject, PDFReference, zlib,
-	    __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; };
+	  var PDFNamedReference, PDFObject, PDFReference, zlib,
+	    bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; };
 
 	  zlib = __webpack_require__(47);
 
+	  PDFNamedReference = __webpack_require__(63);
+
 	  PDFReference = (function() {
-	    function PDFReference(document, id, data) {
+	    function PDFReference(document, id, data, options) {
+	      var ref;
 	      this.document = document;
 	      this.id = id;
 	      this.data = data != null ? data : {};
-	      this.finalize = __bind(this.finalize, this);
+	      this.options = options != null ? options : {};
+	      this.finalize = bind(this.finalize, this);
 	      this.gen = 0;
 	      this.deflate = null;
-	      this.compress = this.document.compress && !this.data.Filter;
+	      this.compress = ((ref = this.options.compress) != null ? ref : true) && this.document.compress && !this.data.Filter;
 	      this.uncompressedLength = 0;
 	      this.chunks = [];
 	    }
@@ -21860,13 +21981,13 @@
 	    };
 
 	    PDFReference.prototype.write = function(chunk) {
-	      var _base;
+	      var base;
 	      if (!Buffer.isBuffer(chunk)) {
 	        chunk = new Buffer(chunk + '\n', 'binary');
 	      }
 	      this.uncompressedLength += chunk.length;
-	      if ((_base = this.data).Length == null) {
-	        _base.Length = 0;
+	      if ((base = this.data).Length == null) {
+	        base.Length = 0;
 	      }
 	      if (this.compress) {
 	        if (!this.deflate) {
@@ -21891,15 +22012,15 @@
 	    };
 
 	    PDFReference.prototype.finalize = function() {
-	      var chunk, _i, _len, _ref;
+	      var chunk, i, len, ref;
 	      this.offset = this.document._offset;
-	      this.document._write("" + this.id + " " + this.gen + " obj");
+	      this.document._write(this.id + " " + this.gen + " obj");
 	      this.document._write(PDFObject.convert(this.data));
 	      if (this.chunks.length) {
 	        this.document._write('stream');
-	        _ref = this.chunks;
-	        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-	          chunk = _ref[_i];
+	        ref = this.chunks;
+	        for (i = 0, len = ref.length; i < len; i++) {
+	          chunk = ref[i];
 	          this.document._write(chunk);
 	        }
 	        this.chunks.length = 0;
@@ -21910,7 +22031,11 @@
 	    };
 
 	    PDFReference.prototype.toString = function() {
-	      return "" + this.id + " " + this.gen + " R";
+	      return this.id + " " + this.gen + " R";
+	    };
+
+	    PDFReference.prototype.namedReference = function(name) {
+	      return this._namedReference || (this._namedReference = new PDFNamedReference(this, name));
 	    };
 
 	    return PDFReference;
@@ -21919,7 +22044,7 @@
 
 	  module.exports = PDFReference;
 
-	  PDFObject = __webpack_require__(45);
+	  PDFObject = __webpack_require__(44);
 
 	}).call(this);
 
@@ -21950,11 +22075,11 @@
 	// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 	// USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-	var Transform = __webpack_require__(42);
+	var Transform = __webpack_require__(41);
 
 	var binding = __webpack_require__(48);
 	var util = __webpack_require__(60);
-	var assert = __webpack_require__(63).ok;
+	var assert = __webpack_require__(62).ok;
 
 	// zlib doesn't provide these, so kludge them in following the same
 	// const naming scheme zlib uses.
@@ -22540,7 +22665,7 @@
 	util.inherits(InflateRaw, Zlib);
 	util.inherits(Unzip, Zlib);
 
-	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer, __webpack_require__(30)))
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer, __webpack_require__(29)))
 
 /***/ },
 /* 48 */
@@ -22783,7 +22908,7 @@
 
 	exports.Zlib = Zlib;
 
-	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(30), __webpack_require__(2).Buffer))
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(29), __webpack_require__(2).Buffer))
 
 /***/ },
 /* 49 */
@@ -28808,7 +28933,7 @@
 	 *     prototype.
 	 * @param {function} superCtor Constructor function to inherit prototype from.
 	 */
-	exports.inherits = __webpack_require__(62);
+	exports.inherits = __webpack_require__(27);
 
 	exports._extend = function(origin, add) {
 	  // Don't do anything if add isn't an object
@@ -28826,7 +28951,7 @@
 	  return Object.prototype.hasOwnProperty.call(obj, prop);
 	}
 
-	/* WEBPACK VAR INJECTION */}.call(exports, (function() { return this; }()), __webpack_require__(30)))
+	/* WEBPACK VAR INJECTION */}.call(exports, (function() { return this; }()), __webpack_require__(29)))
 
 /***/ },
 /* 61 */
@@ -28841,35 +28966,6 @@
 
 /***/ },
 /* 62 */
-/***/ function(module, exports) {
-
-	if (typeof Object.create === 'function') {
-	  // implementation from standard node.js 'util' module
-	  module.exports = function inherits(ctor, superCtor) {
-	    ctor.super_ = superCtor
-	    ctor.prototype = Object.create(superCtor.prototype, {
-	      constructor: {
-	        value: ctor,
-	        enumerable: false,
-	        writable: true,
-	        configurable: true
-	      }
-	    });
-	  };
-	} else {
-	  // old school shim for old browsers
-	  module.exports = function inherits(ctor, superCtor) {
-	    ctor.super_ = superCtor
-	    var TempCtor = function () {}
-	    TempCtor.prototype = superCtor.prototype
-	    ctor.prototype = new TempCtor()
-	    ctor.prototype.constructor = ctor
-	  }
-	}
-
-
-/***/ },
-/* 63 */
 /***/ function(module, exports, __webpack_require__) {
 
 	// http://wiki.commonjs.org/wiki/Unit_Testing/1.0
@@ -29234,10 +29330,382 @@
 
 
 /***/ },
-/* 64 */
+/* 63 */
 /***/ function(module, exports) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
+
+	/*
+	PDFNamedReference - representation of a named reference, e.g. "(file1.txt) 11 0 R"
+	 */
+
+	(function() {
+	  var PDFNamedReference;
+
+	  PDFNamedReference = (function() {
+	    function PDFNamedReference(reference, name) {
+	      this.reference = reference;
+	      this.name = name;
+	    }
+
+	    PDFNamedReference.prototype.toString = function() {
+	      return "(" + this.name + ") " + this.reference;
+	    };
+
+	    return PDFNamedReference;
+
+	  })();
+
+	  module.exports = PDFNamedReference;
+
+	}).call(this);
+
+
+/***/ },
+/* 64 */
+/***/ function(module, exports, __webpack_require__) {
+
+	// Generated by CoffeeScript 1.10.0
+
+	/*
+	PDFEmbeddedFiles - handles embedded files representation in the PDF document
+	 */
+
+	(function() {
+	  var PDFEmbeddedFiles, utf8;
+
+	  utf8 = __webpack_require__(65);
+
+	  PDFEmbeddedFiles = (function() {
+	    function PDFEmbeddedFiles(document, embeddedFiles) {
+	      var embeddedFile, key, ref1, streamRef;
+	      this.document = document;
+	      this.embeddedFiles = embeddedFiles;
+	      ref1 = this.embeddedFiles;
+	      for (key in ref1) {
+	        embeddedFile = ref1[key];
+	        streamRef = this.streamRef(embeddedFile);
+	        this.embeddedFiles[key]._fileRef = this.fileRef(embeddedFile, streamRef);
+	      }
+	    }
+
+	    PDFEmbeddedFiles.prototype.streamRef = function(embeddedFile) {
+	      var ref;
+	      ref = this.document.ref({
+	        Type: 'EmbeddedFile',
+	        Subtype: embeddedFile.mime,
+	        Params: {
+	          ModDate: embeddedFile.updatedAt
+	        }
+	      });
+	      ref.write(utf8.encode(embeddedFile.content));
+	      return ref;
+	    };
+
+	    PDFEmbeddedFiles.prototype.fileRef = function(embeddedFile, streamRef) {
+	      var ref1;
+	      return this.document.ref({
+	        F: new String(embeddedFile.name),
+	        UF: new String(utf8.encode(embeddedFile.name)),
+	        Desc: new String(embeddedFile.description),
+	        Type: 'Filespec',
+	        AFRelationship: (ref1 = embeddedFile.AFRelationship) != null ? ref1 : '',
+	        EF: {
+	          F: streamRef,
+	          UF: streamRef
+	        }
+	      });
+	    };
+
+	    PDFEmbeddedFiles.prototype.names = function() {
+	      return {
+	        Names: this.embeddedFiles.map(function(embeddedFile) {
+	          return embeddedFile._fileRef.namedReference(embeddedFile.name);
+	        })
+	      };
+	    };
+
+	    PDFEmbeddedFiles.prototype.associatedFiles = function() {
+	      return this.document.ref(this.embeddedFiles.map(function(embeddedFile) {
+	        return embeddedFile._fileRef;
+	      }));
+	    };
+
+	    PDFEmbeddedFiles.prototype.end = function() {
+	      var embeddedFile, i, len, ref1, results;
+	      ref1 = this.embeddedFiles;
+	      results = [];
+	      for (i = 0, len = ref1.length; i < len; i++) {
+	        embeddedFile = ref1[i];
+	        embeddedFile._fileRef.data.EF.F.end();
+	        results.push(embeddedFile._fileRef.end());
+	      }
+	      return results;
+	    };
+
+	    return PDFEmbeddedFiles;
+
+	  })();
+
+	  module.exports = PDFEmbeddedFiles;
+
+	}).call(this);
+
+
+/***/ },
+/* 65 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var __WEBPACK_AMD_DEFINE_RESULT__;/* WEBPACK VAR INJECTION */(function(module, global) {/*! https://mths.be/utf8js v2.0.0 by @mathias */
+	;(function(root) {
+
+		// Detect free variables `exports`
+		var freeExports = typeof exports == 'object' && exports;
+
+		// Detect free variable `module`
+		var freeModule = typeof module == 'object' && module &&
+			module.exports == freeExports && module;
+
+		// Detect free variable `global`, from Node.js or Browserified code,
+		// and use it as `root`
+		var freeGlobal = typeof global == 'object' && global;
+		if (freeGlobal.global === freeGlobal || freeGlobal.window === freeGlobal) {
+			root = freeGlobal;
+		}
+
+		/*--------------------------------------------------------------------------*/
+
+		var stringFromCharCode = String.fromCharCode;
+
+		// Taken from https://mths.be/punycode
+		function ucs2decode(string) {
+			var output = [];
+			var counter = 0;
+			var length = string.length;
+			var value;
+			var extra;
+			while (counter < length) {
+				value = string.charCodeAt(counter++);
+				if (value >= 0xD800 && value <= 0xDBFF && counter < length) {
+					// high surrogate, and there is a next character
+					extra = string.charCodeAt(counter++);
+					if ((extra & 0xFC00) == 0xDC00) { // low surrogate
+						output.push(((value & 0x3FF) << 10) + (extra & 0x3FF) + 0x10000);
+					} else {
+						// unmatched surrogate; only append this code unit, in case the next
+						// code unit is the high surrogate of a surrogate pair
+						output.push(value);
+						counter--;
+					}
+				} else {
+					output.push(value);
+				}
+			}
+			return output;
+		}
+
+		// Taken from https://mths.be/punycode
+		function ucs2encode(array) {
+			var length = array.length;
+			var index = -1;
+			var value;
+			var output = '';
+			while (++index < length) {
+				value = array[index];
+				if (value > 0xFFFF) {
+					value -= 0x10000;
+					output += stringFromCharCode(value >>> 10 & 0x3FF | 0xD800);
+					value = 0xDC00 | value & 0x3FF;
+				}
+				output += stringFromCharCode(value);
+			}
+			return output;
+		}
+
+		function checkScalarValue(codePoint) {
+			if (codePoint >= 0xD800 && codePoint <= 0xDFFF) {
+				throw Error(
+					'Lone surrogate U+' + codePoint.toString(16).toUpperCase() +
+					' is not a scalar value'
+				);
+			}
+		}
+		/*--------------------------------------------------------------------------*/
+
+		function createByte(codePoint, shift) {
+			return stringFromCharCode(((codePoint >> shift) & 0x3F) | 0x80);
+		}
+
+		function encodeCodePoint(codePoint) {
+			if ((codePoint & 0xFFFFFF80) == 0) { // 1-byte sequence
+				return stringFromCharCode(codePoint);
+			}
+			var symbol = '';
+			if ((codePoint & 0xFFFFF800) == 0) { // 2-byte sequence
+				symbol = stringFromCharCode(((codePoint >> 6) & 0x1F) | 0xC0);
+			}
+			else if ((codePoint & 0xFFFF0000) == 0) { // 3-byte sequence
+				checkScalarValue(codePoint);
+				symbol = stringFromCharCode(((codePoint >> 12) & 0x0F) | 0xE0);
+				symbol += createByte(codePoint, 6);
+			}
+			else if ((codePoint & 0xFFE00000) == 0) { // 4-byte sequence
+				symbol = stringFromCharCode(((codePoint >> 18) & 0x07) | 0xF0);
+				symbol += createByte(codePoint, 12);
+				symbol += createByte(codePoint, 6);
+			}
+			symbol += stringFromCharCode((codePoint & 0x3F) | 0x80);
+			return symbol;
+		}
+
+		function utf8encode(string) {
+			var codePoints = ucs2decode(string);
+			var length = codePoints.length;
+			var index = -1;
+			var codePoint;
+			var byteString = '';
+			while (++index < length) {
+				codePoint = codePoints[index];
+				byteString += encodeCodePoint(codePoint);
+			}
+			return byteString;
+		}
+
+		/*--------------------------------------------------------------------------*/
+
+		function readContinuationByte() {
+			if (byteIndex >= byteCount) {
+				throw Error('Invalid byte index');
+			}
+
+			var continuationByte = byteArray[byteIndex] & 0xFF;
+			byteIndex++;
+
+			if ((continuationByte & 0xC0) == 0x80) {
+				return continuationByte & 0x3F;
+			}
+
+			// If we end up here, it’s not a continuation byte
+			throw Error('Invalid continuation byte');
+		}
+
+		function decodeSymbol() {
+			var byte1;
+			var byte2;
+			var byte3;
+			var byte4;
+			var codePoint;
+
+			if (byteIndex > byteCount) {
+				throw Error('Invalid byte index');
+			}
+
+			if (byteIndex == byteCount) {
+				return false;
+			}
+
+			// Read first byte
+			byte1 = byteArray[byteIndex] & 0xFF;
+			byteIndex++;
+
+			// 1-byte sequence (no continuation bytes)
+			if ((byte1 & 0x80) == 0) {
+				return byte1;
+			}
+
+			// 2-byte sequence
+			if ((byte1 & 0xE0) == 0xC0) {
+				var byte2 = readContinuationByte();
+				codePoint = ((byte1 & 0x1F) << 6) | byte2;
+				if (codePoint >= 0x80) {
+					return codePoint;
+				} else {
+					throw Error('Invalid continuation byte');
+				}
+			}
+
+			// 3-byte sequence (may include unpaired surrogates)
+			if ((byte1 & 0xF0) == 0xE0) {
+				byte2 = readContinuationByte();
+				byte3 = readContinuationByte();
+				codePoint = ((byte1 & 0x0F) << 12) | (byte2 << 6) | byte3;
+				if (codePoint >= 0x0800) {
+					checkScalarValue(codePoint);
+					return codePoint;
+				} else {
+					throw Error('Invalid continuation byte');
+				}
+			}
+
+			// 4-byte sequence
+			if ((byte1 & 0xF8) == 0xF0) {
+				byte2 = readContinuationByte();
+				byte3 = readContinuationByte();
+				byte4 = readContinuationByte();
+				codePoint = ((byte1 & 0x0F) << 0x12) | (byte2 << 0x0C) |
+					(byte3 << 0x06) | byte4;
+				if (codePoint >= 0x010000 && codePoint <= 0x10FFFF) {
+					return codePoint;
+				}
+			}
+
+			throw Error('Invalid UTF-8 detected');
+		}
+
+		var byteArray;
+		var byteCount;
+		var byteIndex;
+		function utf8decode(byteString) {
+			byteArray = ucs2decode(byteString);
+			byteCount = byteArray.length;
+			byteIndex = 0;
+			var codePoints = [];
+			var tmp;
+			while ((tmp = decodeSymbol()) !== false) {
+				codePoints.push(tmp);
+			}
+			return ucs2encode(codePoints);
+		}
+
+		/*--------------------------------------------------------------------------*/
+
+		var utf8 = {
+			'version': '2.0.0',
+			'encode': utf8encode,
+			'decode': utf8decode
+		};
+
+		// Some AMD build optimizers, like r.js, check for specific condition patterns
+		// like the following:
+		if (
+			true
+		) {
+			!(__WEBPACK_AMD_DEFINE_RESULT__ = function() {
+				return utf8;
+			}.call(exports, __webpack_require__, exports, module), __WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__));
+		}	else if (freeExports && !freeExports.nodeType) {
+			if (freeModule) { // in Node.js or RingoJS v0.8.0+
+				freeModule.exports = utf8;
+			} else { // in Narwhal or RingoJS v0.7.0-
+				var object = {};
+				var hasOwnProperty = object.hasOwnProperty;
+				for (var key in utf8) {
+					hasOwnProperty.call(utf8, key) && (freeExports[key] = utf8[key]);
+				}
+			}
+		} else { // in Rhino or a web browser
+			root.utf8 = utf8;
+		}
+
+	}(this));
+
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(8)(module), (function() { return this; }())))
+
+/***/ },
+/* 66 */
+/***/ function(module, exports) {
+
+	// Generated by CoffeeScript 1.10.0
 
 	/*
 	PDFPage - represents a single page in the PDF document
@@ -29279,40 +29747,40 @@
 	        fonts: {
 	          get: (function(_this) {
 	            return function() {
-	              var _base;
-	              return (_base = _this.resources.data).Font != null ? _base.Font : _base.Font = {};
+	              var base;
+	              return (base = _this.resources.data).Font != null ? base.Font : base.Font = {};
 	            };
 	          })(this)
 	        },
 	        xobjects: {
 	          get: (function(_this) {
 	            return function() {
-	              var _base;
-	              return (_base = _this.resources.data).XObject != null ? _base.XObject : _base.XObject = {};
+	              var base;
+	              return (base = _this.resources.data).XObject != null ? base.XObject : base.XObject = {};
 	            };
 	          })(this)
 	        },
 	        ext_gstates: {
 	          get: (function(_this) {
 	            return function() {
-	              var _base;
-	              return (_base = _this.resources.data).ExtGState != null ? _base.ExtGState : _base.ExtGState = {};
+	              var base;
+	              return (base = _this.resources.data).ExtGState != null ? base.ExtGState : base.ExtGState = {};
 	            };
 	          })(this)
 	        },
 	        patterns: {
 	          get: (function(_this) {
 	            return function() {
-	              var _base;
-	              return (_base = _this.resources.data).Pattern != null ? _base.Pattern : _base.Pattern = {};
+	              var base;
+	              return (base = _this.resources.data).Pattern != null ? base.Pattern : base.Pattern = {};
 	            };
 	          })(this)
 	        },
 	        annotations: {
 	          get: (function(_this) {
 	            return function() {
-	              var _base;
-	              return (_base = _this.dictionary.data).Annots != null ? _base.Annots : _base.Annots = [];
+	              var base;
+	              return (base = _this.dictionary.data).Annots != null ? base.Annots : base.Annots = [];
 	            };
 	          })(this)
 	        }
@@ -29410,14 +29878,14 @@
 
 
 /***/ },
-/* 65 */
+/* 67 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
-	  var PDFGradient, PDFLinearGradient, PDFRadialGradient, namedColors, _ref;
+	  var PDFGradient, PDFLinearGradient, PDFRadialGradient, namedColors, ref;
 
-	  _ref = __webpack_require__(66), PDFGradient = _ref.PDFGradient, PDFLinearGradient = _ref.PDFLinearGradient, PDFRadialGradient = _ref.PDFRadialGradient;
+	  ref = __webpack_require__(68), PDFGradient = ref.PDFGradient, PDFLinearGradient = ref.PDFLinearGradient, PDFRadialGradient = ref.PDFRadialGradient;
 
 	  module.exports = {
 	    initColor: function() {
@@ -29444,23 +29912,23 @@
 	      if (Array.isArray(color)) {
 	        if (color.length === 3) {
 	          color = (function() {
-	            var _i, _len, _results;
-	            _results = [];
-	            for (_i = 0, _len = color.length; _i < _len; _i++) {
-	              part = color[_i];
-	              _results.push(part / 255);
+	            var i, len, results;
+	            results = [];
+	            for (i = 0, len = color.length; i < len; i++) {
+	              part = color[i];
+	              results.push(part / 255);
 	            }
-	            return _results;
+	            return results;
 	          })();
 	        } else if (color.length === 4) {
 	          color = (function() {
-	            var _i, _len, _results;
-	            _results = [];
-	            for (_i = 0, _len = color.length; _i < _len; _i++) {
-	              part = color[_i];
-	              _results.push(part / 100);
+	            var i, len, results;
+	            results = [];
+	            for (i = 0, len = color.length; i < len; i++) {
+	              part = color[i];
+	              results.push(part / 100);
 	            }
-	            return _results;
+	            return results;
 	          })();
 	        }
 	        return color;
@@ -29492,7 +29960,7 @@
 	        space = color.length === 4 ? 'DeviceCMYK' : 'DeviceRGB';
 	        this._setColorSpace(space, stroke);
 	        color = color.join(' ');
-	        this.addContent("" + color + " " + op);
+	        this.addContent(color + " " + op);
 	      }
 	      return true;
 	    },
@@ -29537,7 +30005,7 @@
 	      return this;
 	    },
 	    _doOpacity: function(fillOpacity, strokeOpacity) {
-	      var dictionary, id, key, name, _ref1;
+	      var dictionary, id, key, name, ref1;
 	      if (!((fillOpacity != null) || (strokeOpacity != null))) {
 	        return;
 	      }
@@ -29547,9 +30015,9 @@
 	      if (strokeOpacity != null) {
 	        strokeOpacity = Math.max(0, Math.min(1, strokeOpacity));
 	      }
-	      key = "" + fillOpacity + "_" + strokeOpacity;
+	      key = fillOpacity + "_" + strokeOpacity;
 	      if (this._opacityRegistry[key]) {
-	        _ref1 = this._opacityRegistry[key], dictionary = _ref1[0], name = _ref1[1];
+	        ref1 = this._opacityRegistry[key], dictionary = ref1[0], name = ref1[1];
 	      } else {
 	        dictionary = {
 	          Type: 'ExtGState'
@@ -29731,14 +30199,14 @@
 
 
 /***/ },
-/* 66 */
+/* 68 */
 /***/ function(module, exports) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var PDFGradient, PDFLinearGradient, PDFRadialGradient,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
 	  PDFGradient = (function() {
 	    function PDFGradient(doc) {
@@ -29759,7 +30227,7 @@
 	    };
 
 	    PDFGradient.prototype.embed = function() {
-	      var bounds, dx, dy, encode, fn, form, grad, group, gstate, i, last, m, m0, m1, m11, m12, m2, m21, m22, m3, m4, m5, name, pattern, resources, sMask, shader, stop, stops, v, _i, _j, _len, _ref, _ref1, _ref2;
+	      var bounds, dx, dy, encode, fn, form, grad, group, gstate, i, j, k, last, len, m, m0, m1, m11, m12, m2, m21, m22, m3, m4, m5, name, pattern, ref, ref1, ref2, resources, sMask, shader, stop, stops, v;
 	      if (this.embedded || this.stops.length === 0) {
 	        return;
 	      }
@@ -29771,7 +30239,7 @@
 	      bounds = [];
 	      encode = [];
 	      stops = [];
-	      for (i = _i = 0, _ref = this.stops.length - 1; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
+	      for (i = j = 0, ref = this.stops.length - 1; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        encode.push(0, 1);
 	        if (i + 2 !== this.stops.length) {
 	          bounds.push(this.stops[i + 1][0]);
@@ -29801,7 +30269,7 @@
 	      this.id = 'Sh' + (++this.doc._gradCount);
 	      m = this.doc._ctm.slice();
 	      m0 = m[0], m1 = m[1], m2 = m[2], m3 = m[3], m4 = m[4], m5 = m[5];
-	      _ref1 = this.transform, m11 = _ref1[0], m12 = _ref1[1], m21 = _ref1[2], m22 = _ref1[3], dx = _ref1[4], dy = _ref1[5];
+	      ref1 = this.transform, m11 = ref1[0], m12 = ref1[1], m21 = ref1[2], m22 = ref1[3], dx = ref1[4], dy = ref1[5];
 	      m[0] = m0 * m11 + m2 * m12;
 	      m[1] = m1 * m11 + m3 * m12;
 	      m[2] = m0 * m21 + m2 * m22;
@@ -29815,13 +30283,13 @@
 	        PatternType: 2,
 	        Shading: shader,
 	        Matrix: (function() {
-	          var _j, _len, _results;
-	          _results = [];
-	          for (_j = 0, _len = m.length; _j < _len; _j++) {
-	            v = m[_j];
-	            _results.push(+v.toFixed(5));
+	          var k, len, results;
+	          results = [];
+	          for (k = 0, len = m.length; k < len; k++) {
+	            v = m[k];
+	            results.push(+v.toFixed(5));
 	          }
-	          return _results;
+	          return results;
 	        })()
 	      });
 	      this.doc.page.patterns[this.id] = pattern;
@@ -29831,9 +30299,9 @@
 	      })) {
 	        grad = this.opacityGradient();
 	        grad._colorSpace = 'DeviceGray';
-	        _ref2 = this.stops;
-	        for (_j = 0, _len = _ref2.length; _j < _len; _j++) {
-	          stop = _ref2[_j];
+	        ref2 = this.stops;
+	        for (k = 0, len = ref2.length; k < len; k++) {
+	          stop = ref2[k];
 	          grad.stop(stop[0], [stop[2]]);
 	        }
 	        grad = grad.embed();
@@ -29892,8 +30360,8 @@
 
 	  })();
 
-	  PDFLinearGradient = (function(_super) {
-	    __extends(PDFLinearGradient, _super);
+	  PDFLinearGradient = (function(superClass) {
+	    extend(PDFLinearGradient, superClass);
 
 	    function PDFLinearGradient(doc, x1, y1, x2, y2) {
 	      this.doc = doc;
@@ -29922,8 +30390,8 @@
 
 	  })(PDFGradient);
 
-	  PDFRadialGradient = (function(_super) {
-	    __extends(PDFRadialGradient, _super);
+	  PDFRadialGradient = (function(superClass) {
+	    extend(PDFRadialGradient, superClass);
 
 	    function PDFRadialGradient(doc, x1, y1, r1, x2, y2, r2) {
 	      this.doc = doc;
@@ -29964,15 +30432,15 @@
 
 
 /***/ },
-/* 67 */
+/* 69 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var KAPPA, SVGPath,
-	    __slice = [].slice;
+	    slice = [].slice;
 
-	  SVGPath = __webpack_require__(68);
+	  SVGPath = __webpack_require__(70);
 
 	  KAPPA = 4.0 * ((Math.sqrt(2) - 1.0) / 3.0);
 
@@ -29993,7 +30461,7 @@
 	      return this.addContent('h');
 	    },
 	    lineWidth: function(w) {
-	      return this.addContent("" + w + " w");
+	      return this.addContent(w + " w");
 	    },
 	    _CAP_STYLES: {
 	      BUTT: 0,
@@ -30004,7 +30472,7 @@
 	      if (typeof c === 'string') {
 	        c = this._CAP_STYLES[c.toUpperCase()];
 	      }
-	      return this.addContent("" + c + " J");
+	      return this.addContent(c + " J");
 	    },
 	    _JOIN_STYLES: {
 	      MITER: 0,
@@ -30015,20 +30483,20 @@
 	      if (typeof j === 'string') {
 	        j = this._JOIN_STYLES[j.toUpperCase()];
 	      }
-	      return this.addContent("" + j + " j");
+	      return this.addContent(j + " j");
 	    },
 	    miterLimit: function(m) {
-	      return this.addContent("" + m + " M");
+	      return this.addContent(m + " M");
 	    },
 	    dash: function(length, options) {
-	      var phase, space, _ref;
+	      var phase, ref, space;
 	      if (options == null) {
 	        options = {};
 	      }
 	      if (length == null) {
 	        return this;
 	      }
-	      space = (_ref = options.space) != null ? _ref : length;
+	      space = (ref = options.space) != null ? ref : length;
 	      phase = options.phase || 0;
 	      return this.addContent("[" + length + " " + space + "] " + phase + " d");
 	    },
@@ -30036,19 +30504,19 @@
 	      return this.addContent("[] 0 d");
 	    },
 	    moveTo: function(x, y) {
-	      return this.addContent("" + x + " " + y + " m");
+	      return this.addContent(x + " " + y + " m");
 	    },
 	    lineTo: function(x, y) {
-	      return this.addContent("" + x + " " + y + " l");
+	      return this.addContent(x + " " + y + " l");
 	    },
 	    bezierCurveTo: function(cp1x, cp1y, cp2x, cp2y, x, y) {
-	      return this.addContent("" + cp1x + " " + cp1y + " " + cp2x + " " + cp2y + " " + x + " " + y + " c");
+	      return this.addContent(cp1x + " " + cp1y + " " + cp2x + " " + cp2y + " " + x + " " + y + " c");
 	    },
 	    quadraticCurveTo: function(cpx, cpy, x, y) {
-	      return this.addContent("" + cpx + " " + cpy + " " + x + " " + y + " v");
+	      return this.addContent(cpx + " " + cpy + " " + x + " " + y + " v");
 	    },
 	    rect: function(x, y, w, h) {
-	      return this.addContent("" + x + " " + y + " " + w + " " + h + " re");
+	      return this.addContent(x + " " + y + " " + w + " " + h + " re");
 	    },
 	    roundedRect: function(x, y, w, h, r) {
 	      if (r == null) {
@@ -30088,11 +30556,11 @@
 	      return this.ellipse(x, y, radius);
 	    },
 	    polygon: function() {
-	      var point, points, _i, _len;
-	      points = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+	      var i, len, point, points;
+	      points = 1 <= arguments.length ? slice.call(arguments, 0) : [];
 	      this.moveTo.apply(this, points.shift());
-	      for (_i = 0, _len = points.length; _i < _len; _i++) {
-	        point = points[_i];
+	      for (i = 0, len = points.length; i < len; i++) {
+	        point = points[i];
 	        this.lineTo.apply(this, point);
 	      }
 	      return this.closePath();
@@ -30157,22 +30625,22 @@
 	      m[4] = m0 * dx + m2 * dy + m4;
 	      m[5] = m1 * dx + m3 * dy + m5;
 	      values = ((function() {
-	        var _i, _len, _ref, _results;
-	        _ref = [m11, m12, m21, m22, dx, dy];
-	        _results = [];
-	        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-	          v = _ref[_i];
-	          _results.push(+v.toFixed(5));
+	        var i, len, ref, results;
+	        ref = [m11, m12, m21, m22, dx, dy];
+	        results = [];
+	        for (i = 0, len = ref.length; i < len; i++) {
+	          v = ref[i];
+	          results.push(+v.toFixed(5));
 	        }
-	        return _results;
+	        return results;
 	      })()).join(' ');
-	      return this.addContent("" + values + " cm");
+	      return this.addContent(values + " cm");
 	    },
 	    translate: function(x, y) {
 	      return this.transform(1, 0, 0, 1, x, y);
 	    },
 	    rotate: function(angle, options) {
-	      var cos, rad, sin, x, x1, y, y1, _ref;
+	      var cos, rad, ref, sin, x, x1, y, y1;
 	      if (options == null) {
 	        options = {};
 	      }
@@ -30181,7 +30649,7 @@
 	      sin = Math.sin(rad);
 	      x = y = 0;
 	      if (options.origin != null) {
-	        _ref = options.origin, x = _ref[0], y = _ref[1];
+	        ref = options.origin, x = ref[0], y = ref[1];
 	        x1 = x * cos - y * sin;
 	        y1 = x * sin + y * cos;
 	        x -= x1;
@@ -30190,7 +30658,7 @@
 	      return this.transform(cos, sin, -sin, cos, x, y);
 	    },
 	    scale: function(xFactor, yFactor, options) {
-	      var x, y, _ref;
+	      var ref, x, y;
 	      if (yFactor == null) {
 	        yFactor = xFactor;
 	      }
@@ -30203,7 +30671,7 @@
 	      }
 	      x = y = 0;
 	      if (options.origin != null) {
-	        _ref = options.origin, x = _ref[0], y = _ref[1];
+	        ref = options.origin, x = ref[0], y = ref[1];
 	        x -= xFactor * x;
 	        y -= yFactor * y;
 	      }
@@ -30215,15 +30683,15 @@
 
 
 /***/ },
-/* 68 */
+/* 70 */
 /***/ function(module, exports) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var SVGPath;
 
 	  SVGPath = (function() {
-	    var apply, arcToSegments, cx, cy, parameters, parse, px, py, runners, segmentToBezier, solveArc, sx, sy;
+	    var apply, arcToSegments, cx, cy, fixRoundingError, parameters, parse, px, py, runners, segmentToBezier, solveArc, sx, sy;
 
 	    function SVGPath() {}
 
@@ -30257,14 +30725,14 @@
 	    };
 
 	    parse = function(path) {
-	      var args, c, cmd, curArg, foundDecimal, params, ret, _i, _len;
+	      var args, c, cmd, curArg, foundDecimal, j, len, params, ret;
 	      ret = [];
 	      args = [];
 	      curArg = "";
 	      foundDecimal = false;
 	      params = 0;
-	      for (_i = 0, _len = path.length; _i < _len; _i++) {
-	        c = path[_i];
+	      for (j = 0, len = path.length; j < len; j++) {
+	        c = path[j];
 	        if (parameters[c] != null) {
 	          params = parameters[c];
 	          if (cmd) {
@@ -30335,12 +30803,12 @@
 	    cx = cy = px = py = sx = sy = 0;
 
 	    apply = function(commands, doc) {
-	      var c, i, _i, _len, _name;
+	      var c, i, j, len, name;
 	      cx = cy = px = py = sx = sy = 0;
-	      for (i = _i = 0, _len = commands.length; _i < _len; i = ++_i) {
+	      for (i = j = 0, len = commands.length; j < len; i = ++j) {
 	        c = commands[i];
-	        if (typeof runners[_name = c.cmd] === "function") {
-	          runners[_name](doc, c.args);
+	        if (typeof runners[name = c.cmd] === "function") {
+	          runners[name](doc, c.args);
 	        }
 	      }
 	      return cx = cy = px = py = 0;
@@ -30496,20 +30964,20 @@
 	    };
 
 	    solveArc = function(doc, x, y, coords) {
-	      var bez, ex, ey, large, rot, rx, ry, seg, segs, sweep, _i, _len, _results;
+	      var bez, ex, ey, j, large, len, results, rot, rx, ry, seg, segs, sweep;
 	      rx = coords[0], ry = coords[1], rot = coords[2], large = coords[3], sweep = coords[4], ex = coords[5], ey = coords[6];
 	      segs = arcToSegments(ex, ey, rx, ry, large, sweep, rot, x, y);
-	      _results = [];
-	      for (_i = 0, _len = segs.length; _i < _len; _i++) {
-	        seg = segs[_i];
+	      results = [];
+	      for (j = 0, len = segs.length; j < len; j++) {
+	        seg = segs[j];
 	        bez = segmentToBezier.apply(null, seg);
-	        _results.push(doc.bezierCurveTo.apply(doc, bez));
+	        results.push(doc.bezierCurveTo.apply(doc, bez));
 	      }
-	      return _results;
+	      return results;
 	    };
 
 	    arcToSegments = function(x, y, rx, ry, large, sweep, rotateX, ox, oy) {
-	      var a00, a01, a10, a11, cos_th, d, i, pl, result, segments, sfactor, sfactor_sq, sin_th, th, th0, th1, th2, th3, th_arc, x0, x1, xc, y0, y1, yc, _i;
+	      var a00, a01, a10, a11, cos_th, d, i, j, pl, ref, result, segments, sfactor, sfactor_sq, sin_th, th, th0, th1, th2, th3, th_arc, x0, x1, xc, y0, y1, yc;
 	      th = rotateX * (Math.PI / 180);
 	      sin_th = Math.sin(th);
 	      cos_th = Math.cos(th);
@@ -30552,7 +31020,7 @@
 	      }
 	      segments = Math.ceil(Math.abs(th_arc / (Math.PI * 0.5 + 0.001)));
 	      result = [];
-	      for (i = _i = 0; 0 <= segments ? _i < segments : _i > segments; i = 0 <= segments ? ++_i : --_i) {
+	      for (i = j = 0, ref = segments; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        th2 = th0 + i * th_arc / segments;
 	        th3 = th0 + (i + 1) * th_arc / segments;
 	        result[i] = [xc, yc, th2, th3, rx, ry, sin_th, cos_th];
@@ -30568,13 +31036,20 @@
 	      a11 = cos_th * ry;
 	      th_half = 0.5 * (th1 - th0);
 	      t = (8 / 3) * Math.sin(th_half * 0.5) * Math.sin(th_half * 0.5) / Math.sin(th_half);
-	      x1 = cx + Math.cos(th0) - t * Math.sin(th0);
-	      y1 = cy + Math.sin(th0) + t * Math.cos(th0);
-	      x3 = cx + Math.cos(th1);
-	      y3 = cy + Math.sin(th1);
-	      x2 = x3 + t * Math.sin(th1);
-	      y2 = y3 - t * Math.cos(th1);
+	      x1 = fixRoundingError(cx + Math.cos(th0) - t * Math.sin(th0));
+	      y1 = fixRoundingError(cy + Math.sin(th0) + t * Math.cos(th0));
+	      x3 = fixRoundingError(cx + Math.cos(th1));
+	      y3 = fixRoundingError(cy + Math.sin(th1));
+	      x2 = fixRoundingError(x3 + t * Math.sin(th1));
+	      y2 = fixRoundingError(y3 - t * Math.cos(th1));
 	      return [a00 * x1 + a01 * y1, a10 * x1 + a11 * y1, a00 * x2 + a01 * y2, a10 * x2 + a11 * y2, a00 * x3 + a01 * y3, a10 * x3 + a11 * y3];
+	    };
+
+	    fixRoundingError = function(x) {
+	      if (Math.abs(Math.round(x) - x) < 0.0000000000001) {
+	        return Math.round(x);
+	      }
+	      return x;
 	    };
 
 	    return SVGPath;
@@ -30587,14 +31062,14 @@
 
 
 /***/ },
-/* 69 */
+/* 71 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var PDFFont;
 
-	  PDFFont = __webpack_require__(70);
+	  PDFFont = __webpack_require__(72);
 
 	  module.exports = {
 	    initFonts: function() {
@@ -30606,14 +31081,14 @@
 	      
 	    },
 	    font: function(src, family, size) {
-	      var cacheKey, font, id, _ref;
+	      var cacheKey, font, id, ref;
 	      if (typeof family === 'number') {
 	        size = family;
 	        family = null;
 	      }
 	      if (typeof src === 'string' && this._registeredFonts[src]) {
 	        cacheKey = src;
-	        _ref = this._registeredFonts[src], src = _ref.src, family = _ref.family;
+	        ref = this._registeredFonts[src], src = ref.src, family = ref.family;
 	      } else {
 	        cacheKey = family || src;
 	        if (typeof cacheKey !== 'string') {
@@ -30662,10 +31137,10 @@
 
 
 /***/ },
-/* 70 */
+/* 72 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer, __dirname) {// Generated by CoffeeScript 1.7.1
+	/* WEBPACK VAR INJECTION */(function(Buffer, __dirname) {// Generated by CoffeeScript 1.10.0
 
 	/*
 	PDFFont - embeds fonts in PDF documents
@@ -30675,13 +31150,13 @@
 	(function() {
 	  var AFMFont, PDFFont, Subset, TTFFont, fs;
 
-	  TTFFont = __webpack_require__(71);
+	  TTFFont = __webpack_require__(73);
 
-	  AFMFont = __webpack_require__(87);
+	  AFMFont = __webpack_require__(89);
 
-	  Subset = __webpack_require__(88);
+	  Subset = __webpack_require__(90);
 
-	  fs = __webpack_require__(44);
+	  fs = __webpack_require__(43);
 
 	  PDFFont = (function() {
 	    var STANDARD_FONTS, toUnicodeCmap;
@@ -30761,8 +31236,8 @@
 	    };
 
 	    PDFFont.prototype.use = function(characters) {
-	      var _ref;
-	      return (_ref = this.subset) != null ? _ref.use(characters) : void 0;
+	      var ref;
+	      return (ref = this.subset) != null ? ref.use(characters) : void 0;
 	    };
 
 	    PDFFont.prototype.embed = function() {
@@ -30778,11 +31253,11 @@
 	    };
 
 	    PDFFont.prototype.encode = function(text) {
-	      var _ref;
+	      var ref;
 	      if (this.isAFM) {
 	        return this.font.encodeText(text);
 	      } else {
-	        return ((_ref = this.subset) != null ? _ref.encodeText(text) : void 0) || text;
+	        return ((ref = this.subset) != null ? ref.encodeText(text) : void 0) || text;
 	      }
 	    };
 
@@ -30791,18 +31266,18 @@
 	    };
 
 	    PDFFont.prototype.registerTTF = function() {
-	      var e, hi, low, raw, _ref;
+	      var e, hi, low, raw, ref;
 	      this.name = this.font.name.postscriptName;
 	      this.scaleFactor = 1000.0 / this.font.head.unitsPerEm;
 	      this.bbox = (function() {
-	        var _i, _len, _ref, _results;
-	        _ref = this.font.bbox;
-	        _results = [];
-	        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-	          e = _ref[_i];
-	          _results.push(Math.round(e * this.scaleFactor));
+	        var j, len, ref, results;
+	        ref = this.font.bbox;
+	        results = [];
+	        for (j = 0, len = ref.length; j < len; j++) {
+	          e = ref[j];
+	          results.push(Math.round(e * this.scaleFactor));
 	        }
-	        return _results;
+	        return results;
 	      }).call(this);
 	      this.stemV = 0;
 	      if (this.font.post.exists) {
@@ -30812,7 +31287,7 @@
 	        if (hi & 0x8000 !== 0) {
 	          hi = -((hi ^ 0xFFFF) + 1);
 	        }
-	        this.italicAngle = +("" + hi + "." + low);
+	        this.italicAngle = +(hi + "." + low);
 	      } else {
 	        this.italicAngle = 0;
 	      }
@@ -30822,7 +31297,7 @@
 	      this.capHeight = (this.font.os2.exists && this.font.os2.capHeight) || this.ascender;
 	      this.xHeight = (this.font.os2.exists && this.font.os2.xHeight) || 0;
 	      this.familyClass = (this.font.os2.exists && this.font.os2.familyClass || 0) >> 8;
-	      this.isSerif = (_ref = this.familyClass) === 1 || _ref === 2 || _ref === 3 || _ref === 4 || _ref === 5 || _ref === 7;
+	      this.isSerif = (ref = this.familyClass) === 1 || ref === 2 || ref === 3 || ref === 4 || ref === 5 || ref === 7;
 	      this.isScript = this.familyClass === 10;
 	      this.flags = 0;
 	      if (this.font.post.isFixedPitch) {
@@ -30866,14 +31341,14 @@
 	      descriptor.end();
 	      firstChar = +Object.keys(this.subset.cmap)[0];
 	      charWidths = (function() {
-	        var _ref, _results;
-	        _ref = this.subset.cmap;
-	        _results = [];
-	        for (code in _ref) {
-	          glyph = _ref[code];
-	          _results.push(Math.round(this.font.widthOfGlyph(glyph)));
+	        var ref, results;
+	        ref = this.subset.cmap;
+	        results = [];
+	        for (code in ref) {
+	          glyph = ref[code];
+	          results.push(Math.round(this.font.widthOfGlyph(glyph)));
 	        }
-	        return _results;
+	        return results;
 	      }).call(this);
 	      cmap = this.document.ref();
 	      cmap.end(toUnicodeCmap(this.subset.subset));
@@ -30892,14 +31367,14 @@
 	    };
 
 	    toUnicodeCmap = function(map) {
-	      var code, codes, range, unicode, unicodeMap, _i, _len;
+	      var code, codes, j, len, range, unicode, unicodeMap;
 	      unicodeMap = '/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo <<\n  /Registry (Adobe)\n  /Ordering (UCS)\n  /Supplement 0\n>> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<00><ff>\nendcodespacerange';
 	      codes = Object.keys(map).sort(function(a, b) {
 	        return a - b;
 	      });
 	      range = [];
-	      for (_i = 0, _len = codes.length; _i < _len; _i++) {
-	        code = codes[_i];
+	      for (j = 0, len = codes.length; j < len; j++) {
+	        code = codes[j];
 	        if (range.length >= 100) {
 	          unicodeMap += "\n" + range.length + " beginbfchar\n" + (range.join('\n')) + "\nendbfchar";
 	          range = [];
@@ -30915,9 +31390,9 @@
 	    };
 
 	    PDFFont.prototype.registerAFM = function(name) {
-	      var _ref;
+	      var ref;
 	      this.name = name;
-	      return _ref = this.font, this.ascender = _ref.ascender, this.decender = _ref.decender, this.bbox = _ref.bbox, this.lineGap = _ref.lineGap, _ref;
+	      return ref = this.font, this.ascender = ref.ascender, this.decender = ref.decender, this.bbox = ref.bbox, this.lineGap = ref.lineGap, ref;
 	    };
 
 	    PDFFont.prototype.embedAFM = function() {
@@ -30931,10 +31406,10 @@
 	    };
 
 	    PDFFont.prototype.widthOfString = function(string, size) {
-	      var charCode, i, scale, width, _i, _ref;
+	      var charCode, i, j, ref, scale, width;
 	      string = '' + string;
 	      width = 0;
-	      for (i = _i = 0, _ref = string.length; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
+	      for (i = j = 0, ref = string.length; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        charCode = string.charCodeAt(i);
 	        width += this.font.widthOfGlyph(this.font.characterToGlyph(charCode)) || 0;
 	      }
@@ -30962,40 +31437,40 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer, "/"))
 
 /***/ },
-/* 71 */
+/* 73 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var CmapTable, DFont, Data, Directory, GlyfTable, HeadTable, HheaTable, HmtxTable, LocaTable, MaxpTable, NameTable, OS2Table, PostTable, TTFFont, fs;
 
-	  fs = __webpack_require__(44);
+	  fs = __webpack_require__(43);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  DFont = __webpack_require__(73);
+	  DFont = __webpack_require__(75);
 
-	  Directory = __webpack_require__(74);
+	  Directory = __webpack_require__(76);
 
-	  NameTable = __webpack_require__(75);
+	  NameTable = __webpack_require__(77);
 
-	  HeadTable = __webpack_require__(78);
+	  HeadTable = __webpack_require__(80);
 
-	  CmapTable = __webpack_require__(79);
+	  CmapTable = __webpack_require__(81);
 
-	  HmtxTable = __webpack_require__(80);
+	  HmtxTable = __webpack_require__(82);
 
-	  HheaTable = __webpack_require__(81);
+	  HheaTable = __webpack_require__(83);
 
-	  MaxpTable = __webpack_require__(82);
+	  MaxpTable = __webpack_require__(84);
 
-	  PostTable = __webpack_require__(83);
+	  PostTable = __webpack_require__(85);
 
-	  OS2Table = __webpack_require__(84);
+	  OS2Table = __webpack_require__(86);
 
-	  LocaTable = __webpack_require__(85);
+	  LocaTable = __webpack_require__(87);
 
-	  GlyfTable = __webpack_require__(86);
+	  GlyfTable = __webpack_require__(88);
 
 	  TTFFont = (function() {
 	    TTFFont.open = function(filename, name) {
@@ -31011,7 +31486,7 @@
 	    };
 
 	    TTFFont.fromBuffer = function(buffer, family) {
-	      var dfont, e, ttf;
+	      var dfont, e, error, ttf;
 	      try {
 	        ttf = new TTFFont(buffer, family);
 	        if (!(ttf.head.exists && ttf.name.exists && ttf.cmap.exists)) {
@@ -31022,14 +31497,14 @@
 	          }
 	        }
 	        return ttf;
-	      } catch (_error) {
-	        e = _error;
+	      } catch (error) {
+	        e = error;
 	        throw new Error('Unknown font format in buffer: ' + e.message);
 	      }
 	    };
 
 	    function TTFFont(rawData, name) {
-	      var data, i, numFonts, offset, offsets, version, _i, _j, _len;
+	      var data, i, j, k, len, numFonts, offset, offsets, ref, version;
 	      this.rawData = rawData;
 	      data = this.contents = new Data(this.rawData);
 	      if (data.readString(4) === 'ttcf') {
@@ -31039,10 +31514,10 @@
 	        version = data.readInt();
 	        numFonts = data.readInt();
 	        offsets = [];
-	        for (i = _i = 0; 0 <= numFonts ? _i < numFonts : _i > numFonts; i = 0 <= numFonts ? ++_i : --_i) {
+	        for (i = j = 0, ref = numFonts; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	          offsets[i] = data.readInt();
 	        }
-	        for (i = _j = 0, _len = offsets.length; _j < _len; i = ++_j) {
+	        for (i = k = 0, len = offsets.length; k < len; i = ++k) {
 	          offset = offsets[i];
 	          data.pos = offset;
 	          this.parse();
@@ -31076,8 +31551,8 @@
 	    };
 
 	    TTFFont.prototype.characterToGlyph = function(character) {
-	      var _ref;
-	      return ((_ref = this.cmap.unicode) != null ? _ref.codeMap[character] : void 0) || 0;
+	      var ref;
+	      return ((ref = this.cmap.unicode) != null ? ref.codeMap[character] : void 0) || 0;
 	    };
 
 	    TTFFont.prototype.widthOfGlyph = function(glyph) {
@@ -31096,10 +31571,10 @@
 
 
 /***/ },
-/* 72 */
+/* 74 */
 /***/ function(module, exports) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Data;
 
@@ -31193,21 +31668,21 @@
 	    };
 
 	    Data.prototype.readString = function(length) {
-	      var i, ret, _i;
+	      var i, j, ref, ret;
 	      ret = [];
-	      for (i = _i = 0; 0 <= length ? _i < length : _i > length; i = 0 <= length ? ++_i : --_i) {
+	      for (i = j = 0, ref = length; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        ret[i] = String.fromCharCode(this.readByte());
 	      }
 	      return ret.join('');
 	    };
 
 	    Data.prototype.writeString = function(val) {
-	      var i, _i, _ref, _results;
-	      _results = [];
-	      for (i = _i = 0, _ref = val.length; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
-	        _results.push(this.writeByte(val.charCodeAt(i)));
+	      var i, j, ref, results;
+	      results = [];
+	      for (i = j = 0, ref = val.length; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
+	        results.push(this.writeByte(val.charCodeAt(i)));
 	      }
-	      return _results;
+	      return results;
 	    };
 
 	    Data.prototype.stringAt = function(pos, length) {
@@ -31266,22 +31741,22 @@
 	    };
 
 	    Data.prototype.read = function(bytes) {
-	      var buf, i, _i;
+	      var buf, i, j, ref;
 	      buf = [];
-	      for (i = _i = 0; 0 <= bytes ? _i < bytes : _i > bytes; i = 0 <= bytes ? ++_i : --_i) {
+	      for (i = j = 0, ref = bytes; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        buf.push(this.readByte());
 	      }
 	      return buf;
 	    };
 
 	    Data.prototype.write = function(bytes) {
-	      var byte, _i, _len, _results;
-	      _results = [];
-	      for (_i = 0, _len = bytes.length; _i < _len; _i++) {
-	        byte = bytes[_i];
-	        _results.push(this.writeByte(byte));
+	      var byte, j, len, results;
+	      results = [];
+	      for (j = 0, len = bytes.length; j < len; j++) {
+	        byte = bytes[j];
+	        results.push(this.writeByte(byte));
 	      }
-	      return _results;
+	      return results;
 	    };
 
 	    return Data;
@@ -31294,20 +31769,20 @@
 
 
 /***/ },
-/* 73 */
+/* 75 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var DFont, Data, Directory, NameTable, fs;
 
-	  fs = __webpack_require__(44);
+	  fs = __webpack_require__(43);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  Directory = __webpack_require__(74);
+	  Directory = __webpack_require__(76);
 
-	  NameTable = __webpack_require__(75);
+	  NameTable = __webpack_require__(77);
 
 	  DFont = (function() {
 	    DFont.open = function(filename) {
@@ -31322,7 +31797,7 @@
 	    }
 
 	    DFont.prototype.parse = function(data) {
-	      var attr, b2, b3, b4, dataLength, dataOffset, dataOfs, entry, font, handle, i, id, j, len, length, mapLength, mapOffset, maxIndex, maxTypeIndex, name, nameListOffset, nameOfs, p, pos, refListOffset, type, typeListOffset, _i, _j;
+	      var attr, b2, b3, b4, dataLength, dataOffset, dataOfs, entry, font, handle, i, id, j, k, l, len, length, mapLength, mapOffset, maxIndex, maxTypeIndex, name, nameListOffset, nameOfs, p, pos, ref, ref1, refListOffset, type, typeListOffset;
 	      dataOffset = data.readInt();
 	      mapOffset = data.readInt();
 	      dataLength = data.readInt();
@@ -31333,7 +31808,7 @@
 	      nameListOffset = data.readShort() + mapOffset;
 	      data.pos = typeListOffset;
 	      maxIndex = data.readShort();
-	      for (i = _i = 0; _i <= maxIndex; i = _i += 1) {
+	      for (i = k = 0, ref = maxIndex; k <= ref; i = k += 1) {
 	        type = data.readString(4);
 	        maxTypeIndex = data.readShort();
 	        refListOffset = data.readShort();
@@ -31343,7 +31818,7 @@
 	        };
 	        pos = data.pos;
 	        data.pos = typeListOffset + refListOffset;
-	        for (j = _j = 0; _j <= maxTypeIndex; j = _j += 1) {
+	        for (j = l = 0, ref1 = maxTypeIndex; l <= ref1; j = l += 1) {
 	          id = data.readShort();
 	          nameOfs = data.readShort();
 	          attr = data.readByte();
@@ -31383,10 +31858,10 @@
 	    };
 
 	    DFont.prototype.getNamedFont = function(name) {
-	      var data, entry, length, pos, ret, _ref;
+	      var data, entry, length, pos, ref, ret;
 	      data = this.contents;
 	      pos = data.pos;
-	      entry = (_ref = this.map.sfnt) != null ? _ref.named[name] : void 0;
+	      entry = (ref = this.map.sfnt) != null ? ref.named[name] : void 0;
 	      if (!entry) {
 	        throw new Error("Font " + name + " not found in DFont file.");
 	      }
@@ -31407,28 +31882,28 @@
 
 
 /***/ },
-/* 74 */
+/* 76 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.7.1
+	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Data, Directory,
-	    __slice = [].slice;
+	    slice = [].slice;
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
 	  Directory = (function() {
 	    var checksum;
 
 	    function Directory(data) {
-	      var entry, i, _i, _ref;
+	      var entry, i, j, ref;
 	      this.scalarType = data.readInt();
 	      this.tableCount = data.readShort();
 	      this.searchRange = data.readShort();
 	      this.entrySelector = data.readShort();
 	      this.rangeShift = data.readShort();
 	      this.tables = {};
-	      for (i = _i = 0, _ref = this.tableCount; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
+	      for (i = j = 0, ref = this.tableCount; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        entry = {
 	          tag: data.readString(4),
 	          checksum: data.readInt(),
@@ -31481,14 +31956,14 @@
 	    };
 
 	    checksum = function(data) {
-	      var i, sum, tmp, _i, _ref;
-	      data = __slice.call(data);
+	      var i, j, ref, sum, tmp;
+	      data = slice.call(data);
 	      while (data.length % 4) {
 	        data.push(0);
 	      }
 	      tmp = new Data(data);
 	      sum = 0;
-	      for (i = _i = 0, _ref = data.length; _i < _ref; i = _i += 4) {
+	      for (i = j = 0, ref = data.length; j < ref; i = j += 4) {
 	        sum += tmp.readUInt32();
 	      }
 	      return sum & 0xFFFFFFFF;
@@ -31505,25 +31980,25 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer))
 
 /***/ },
-/* 75 */
+/* 77 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Data, NameEntry, NameTable, Table, utils,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  utils = __webpack_require__(77);
+	  utils = __webpack_require__(79);
 
-	  NameTable = (function(_super) {
+	  NameTable = (function(superClass) {
 	    var subsetTag;
 
-	    __extends(NameTable, _super);
+	    extend(NameTable, superClass);
 
 	    function NameTable() {
 	      return NameTable.__super__.constructor.apply(this, arguments);
@@ -31532,13 +32007,13 @@
 	    NameTable.prototype.tag = 'name';
 
 	    NameTable.prototype.parse = function(data) {
-	      var count, entries, entry, format, i, name, stringOffset, strings, text, _i, _j, _len, _name;
+	      var count, entries, entry, format, i, j, k, len, name, name1, ref, stringOffset, strings, text;
 	      data.pos = this.offset;
 	      format = data.readShort();
 	      count = data.readShort();
 	      stringOffset = data.readShort();
 	      entries = [];
-	      for (i = _i = 0; 0 <= count ? _i < count : _i > count; i = 0 <= count ? ++_i : --_i) {
+	      for (i = j = 0, ref = count; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        entries.push({
 	          platformID: data.readShort(),
 	          encodingID: data.readShort(),
@@ -31549,13 +32024,13 @@
 	        });
 	      }
 	      strings = {};
-	      for (i = _j = 0, _len = entries.length; _j < _len; i = ++_j) {
+	      for (i = k = 0, len = entries.length; k < len; i = ++k) {
 	        entry = entries[i];
 	        data.pos = entry.offset;
 	        text = data.readString(entry.length);
 	        name = new NameEntry(text, entry);
-	        if (strings[_name = entry.nameID] == null) {
-	          strings[_name] = [];
+	        if (strings[name1 = entry.nameID] == null) {
+	          strings[name1] = [];
 	        }
 	        strings[entry.nameID].push(name);
 	      }
@@ -31584,14 +32059,14 @@
 	    subsetTag = "AAAAAA";
 
 	    NameTable.prototype.encode = function() {
-	      var id, list, nameID, nameTable, postscriptName, strCount, strTable, string, strings, table, val, _i, _len, _ref;
+	      var id, j, len, list, nameID, nameTable, postscriptName, ref, strCount, strTable, string, strings, table, val;
 	      strings = {};
-	      _ref = this.strings;
-	      for (id in _ref) {
-	        val = _ref[id];
+	      ref = this.strings;
+	      for (id in ref) {
+	        val = ref[id];
 	        strings[id] = val;
 	      }
-	      postscriptName = new NameEntry("" + subsetTag + "+" + this.postscriptName, {
+	      postscriptName = new NameEntry(subsetTag + "+" + this.postscriptName, {
 	        platformID: 1,
 	        encodingID: 0,
 	        languageID: 0
@@ -31613,8 +32088,8 @@
 	      for (nameID in strings) {
 	        list = strings[nameID];
 	        if (list != null) {
-	          for (_i = 0, _len = list.length; _i < _len; _i++) {
-	            string = list[_i];
+	          for (j = 0, len = list.length; j < len; j++) {
+	            string = list[j];
 	            table.writeShort(string.platformID);
 	            table.writeShort(string.encodingID);
 	            table.writeShort(string.languageID);
@@ -31654,10 +32129,10 @@
 
 
 /***/ },
-/* 76 */
+/* 78 */
 /***/ function(module, exports) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Table;
 
@@ -31695,10 +32170,10 @@
 
 
 /***/ },
-/* 77 */
+/* 79 */
 /***/ function(module, exports) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 
 	/*
 	 * An implementation of Ruby's string.succ method.
@@ -31779,21 +32254,21 @@
 
 
 /***/ },
-/* 78 */
+/* 80 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Data, HeadTable, Table,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  HeadTable = (function(_super) {
-	    __extends(HeadTable, _super);
+	  HeadTable = (function(superClass) {
+	    extend(HeadTable, superClass);
 
 	    function HeadTable() {
 	      return HeadTable.__super__.constructor.apply(this, arguments);
@@ -31855,21 +32330,21 @@
 
 
 /***/ },
-/* 79 */
+/* 81 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var CmapEntry, CmapTable, Data, Table,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  CmapTable = (function(_super) {
-	    __extends(CmapTable, _super);
+	  CmapTable = (function(superClass) {
+	    extend(CmapTable, superClass);
 
 	    function CmapTable() {
 	      return CmapTable.__super__.constructor.apply(this, arguments);
@@ -31878,13 +32353,13 @@
 	    CmapTable.prototype.tag = 'cmap';
 
 	    CmapTable.prototype.parse = function(data) {
-	      var entry, i, tableCount, _i;
+	      var entry, i, j, ref, tableCount;
 	      data.pos = this.offset;
 	      this.version = data.readUInt16();
 	      tableCount = data.readUInt16();
 	      this.tables = [];
 	      this.unicode = null;
-	      for (i = _i = 0; 0 <= tableCount ? _i < tableCount : _i > tableCount; i = 0 <= tableCount ? ++_i : --_i) {
+	      for (i = j = 0, ref = tableCount; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        entry = new CmapEntry(data, this.offset);
 	        this.tables.push(entry);
 	        if (entry.isUnicode) {
@@ -31915,7 +32390,7 @@
 
 	  CmapEntry = (function() {
 	    function CmapEntry(data, offset) {
-	      var code, count, endCode, glyphId, glyphIds, i, idDelta, idRangeOffset, index, saveOffset, segCount, segCountX2, start, startCode, tail, _i, _j, _k, _len;
+	      var code, count, endCode, glyphId, glyphIds, i, idDelta, idRangeOffset, index, j, k, l, len, ref, ref1, saveOffset, segCount, segCountX2, start, startCode, tail;
 	      this.platformID = data.readUInt16();
 	      this.encodingID = data.readShort();
 	      this.offset = offset + data.readInt();
@@ -31928,7 +32403,7 @@
 	      this.codeMap = {};
 	      switch (this.format) {
 	        case 0:
-	          for (i = _i = 0; _i < 256; i = ++_i) {
+	          for (i = j = 0; j < 256; i = ++j) {
 	            this.codeMap[i] = data.readByte();
 	          }
 	          break;
@@ -31937,51 +32412,51 @@
 	          segCount = segCountX2 / 2;
 	          data.pos += 6;
 	          endCode = (function() {
-	            var _j, _results;
-	            _results = [];
-	            for (i = _j = 0; 0 <= segCount ? _j < segCount : _j > segCount; i = 0 <= segCount ? ++_j : --_j) {
-	              _results.push(data.readUInt16());
+	            var k, ref, results;
+	            results = [];
+	            for (i = k = 0, ref = segCount; 0 <= ref ? k < ref : k > ref; i = 0 <= ref ? ++k : --k) {
+	              results.push(data.readUInt16());
 	            }
-	            return _results;
+	            return results;
 	          })();
 	          data.pos += 2;
 	          startCode = (function() {
-	            var _j, _results;
-	            _results = [];
-	            for (i = _j = 0; 0 <= segCount ? _j < segCount : _j > segCount; i = 0 <= segCount ? ++_j : --_j) {
-	              _results.push(data.readUInt16());
+	            var k, ref, results;
+	            results = [];
+	            for (i = k = 0, ref = segCount; 0 <= ref ? k < ref : k > ref; i = 0 <= ref ? ++k : --k) {
+	              results.push(data.readUInt16());
 	            }
-	            return _results;
+	            return results;
 	          })();
 	          idDelta = (function() {
-	            var _j, _results;
-	            _results = [];
-	            for (i = _j = 0; 0 <= segCount ? _j < segCount : _j > segCount; i = 0 <= segCount ? ++_j : --_j) {
-	              _results.push(data.readUInt16());
+	            var k, ref, results;
+	            results = [];
+	            for (i = k = 0, ref = segCount; 0 <= ref ? k < ref : k > ref; i = 0 <= ref ? ++k : --k) {
+	              results.push(data.readUInt16());
 	            }
-	            return _results;
+	            return results;
 	          })();
 	          idRangeOffset = (function() {
-	            var _j, _results;
-	            _results = [];
-	            for (i = _j = 0; 0 <= segCount ? _j < segCount : _j > segCount; i = 0 <= segCount ? ++_j : --_j) {
-	              _results.push(data.readUInt16());
+	            var k, ref, results;
+	            results = [];
+	            for (i = k = 0, ref = segCount; 0 <= ref ? k < ref : k > ref; i = 0 <= ref ? ++k : --k) {
+	              results.push(data.readUInt16());
 	            }
-	            return _results;
+	            return results;
 	          })();
 	          count = (this.length - data.pos + this.offset) / 2;
 	          glyphIds = (function() {
-	            var _j, _results;
-	            _results = [];
-	            for (i = _j = 0; 0 <= count ? _j < count : _j > count; i = 0 <= count ? ++_j : --_j) {
-	              _results.push(data.readUInt16());
+	            var k, ref, results;
+	            results = [];
+	            for (i = k = 0, ref = count; 0 <= ref ? k < ref : k > ref; i = 0 <= ref ? ++k : --k) {
+	              results.push(data.readUInt16());
 	            }
-	            return _results;
+	            return results;
 	          })();
-	          for (i = _j = 0, _len = endCode.length; _j < _len; i = ++_j) {
+	          for (i = k = 0, len = endCode.length; k < len; i = ++k) {
 	            tail = endCode[i];
 	            start = startCode[i];
-	            for (code = _k = start; start <= tail ? _k <= tail : _k >= tail; code = start <= tail ? ++_k : --_k) {
+	            for (code = l = ref = start, ref1 = tail; ref <= ref1 ? l <= ref1 : l >= ref1; code = ref <= ref1 ? ++l : --l) {
 	              if (idRangeOffset[i] === 0) {
 	                glyphId = code + idDelta[i];
 	              } else {
@@ -31999,7 +32474,7 @@
 	    }
 
 	    CmapEntry.encode = function(charmap, encoding) {
-	      var charMap, code, codeMap, codes, delta, deltas, diff, endCode, endCodes, entrySelector, glyphIDs, i, id, indexes, last, map, nextID, offset, old, rangeOffsets, rangeShift, result, searchRange, segCount, segCountX2, startCode, startCodes, startGlyph, subtable, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _len5, _len6, _len7, _m, _n, _name, _o, _p, _q;
+	      var charMap, code, codeMap, codes, delta, deltas, diff, endCode, endCodes, entrySelector, glyphIDs, i, id, indexes, j, k, l, last, len, len1, len2, len3, len4, len5, len6, len7, m, map, n, name, nextID, o, offset, old, p, q, r, rangeOffsets, rangeShift, ref, ref1, result, searchRange, segCount, segCountX2, startCode, startCodes, startGlyph, subtable;
 	      subtable = new Data;
 	      codes = Object.keys(charmap).sort(function(a, b) {
 	        return a - b;
@@ -32008,21 +32483,21 @@
 	        case 'macroman':
 	          id = 0;
 	          indexes = (function() {
-	            var _i, _results;
-	            _results = [];
-	            for (i = _i = 0; _i < 256; i = ++_i) {
-	              _results.push(0);
+	            var j, results;
+	            results = [];
+	            for (i = j = 0; j < 256; i = ++j) {
+	              results.push(0);
 	            }
-	            return _results;
+	            return results;
 	          })();
 	          map = {
 	            0: 0
 	          };
 	          codeMap = {};
-	          for (_i = 0, _len = codes.length; _i < _len; _i++) {
-	            code = codes[_i];
-	            if (map[_name = charmap[code]] == null) {
-	              map[_name] = ++id;
+	          for (j = 0, len = codes.length; j < len; j++) {
+	            code = codes[j];
+	            if (map[name = charmap[code]] == null) {
+	              map[name] = ++id;
 	            }
 	            codeMap[code] = {
 	              old: charmap[code],
@@ -32049,8 +32524,8 @@
 	          map = {};
 	          charMap = {};
 	          last = diff = null;
-	          for (_j = 0, _len1 = codes.length; _j < _len1; _j++) {
-	            code = codes[_j];
+	          for (k = 0, len1 = codes.length; k < len1; k++) {
+	            code = codes[k];
 	            old = charmap[code];
 	            if (map[old] == null) {
 	              map[old] = ++nextID;
@@ -32082,7 +32557,7 @@
 	          deltas = [];
 	          rangeOffsets = [];
 	          glyphIDs = [];
-	          for (i = _k = 0, _len2 = startCodes.length; _k < _len2; i = ++_k) {
+	          for (i = l = 0, len2 = startCodes.length; l < len2; i = ++l) {
 	            startCode = startCodes[i];
 	            endCode = endCodes[i];
 	            if (startCode === 0xFFFF) {
@@ -32094,7 +32569,7 @@
 	            if (startCode - startGlyph >= 0x8000) {
 	              deltas.push(0);
 	              rangeOffsets.push(2 * (glyphIDs.length + segCount - i));
-	              for (code = _l = startCode; startCode <= endCode ? _l <= endCode : _l >= endCode; code = startCode <= endCode ? ++_l : --_l) {
+	              for (code = m = ref = startCode, ref1 = endCode; ref <= ref1 ? m <= ref1 : m >= ref1; code = ref <= ref1 ? ++m : --m) {
 	                glyphIDs.push(charMap[code]["new"]);
 	              }
 	            } else {
@@ -32112,25 +32587,25 @@
 	          subtable.writeUInt16(searchRange);
 	          subtable.writeUInt16(entrySelector);
 	          subtable.writeUInt16(rangeShift);
-	          for (_m = 0, _len3 = endCodes.length; _m < _len3; _m++) {
-	            code = endCodes[_m];
+	          for (n = 0, len3 = endCodes.length; n < len3; n++) {
+	            code = endCodes[n];
 	            subtable.writeUInt16(code);
 	          }
 	          subtable.writeUInt16(0);
-	          for (_n = 0, _len4 = startCodes.length; _n < _len4; _n++) {
-	            code = startCodes[_n];
+	          for (o = 0, len4 = startCodes.length; o < len4; o++) {
+	            code = startCodes[o];
 	            subtable.writeUInt16(code);
 	          }
-	          for (_o = 0, _len5 = deltas.length; _o < _len5; _o++) {
-	            delta = deltas[_o];
+	          for (p = 0, len5 = deltas.length; p < len5; p++) {
+	            delta = deltas[p];
 	            subtable.writeUInt16(delta);
 	          }
-	          for (_p = 0, _len6 = rangeOffsets.length; _p < _len6; _p++) {
-	            offset = rangeOffsets[_p];
+	          for (q = 0, len6 = rangeOffsets.length; q < len6; q++) {
+	            offset = rangeOffsets[q];
 	            subtable.writeUInt16(offset);
 	          }
-	          for (_q = 0, _len7 = glyphIDs.length; _q < _len7; _q++) {
-	            id = glyphIDs[_q];
+	          for (r = 0, len7 = glyphIDs.length; r < len7; r++) {
+	            id = glyphIDs[r];
 	            subtable.writeUInt16(id);
 	          }
 	          return result = {
@@ -32151,21 +32626,21 @@
 
 
 /***/ },
-/* 80 */
+/* 82 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Data, HmtxTable, Table,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  HmtxTable = (function(_super) {
-	    __extends(HmtxTable, _super);
+	  HmtxTable = (function(superClass) {
+	    extend(HmtxTable, superClass);
 
 	    function HmtxTable() {
 	      return HmtxTable.__super__.constructor.apply(this, arguments);
@@ -32174,10 +32649,10 @@
 	    HmtxTable.prototype.tag = 'hmtx';
 
 	    HmtxTable.prototype.parse = function(data) {
-	      var i, last, lsbCount, m, _i, _j, _ref, _results;
+	      var i, j, k, last, lsbCount, m, ref, ref1, results;
 	      data.pos = this.offset;
 	      this.metrics = [];
-	      for (i = _i = 0, _ref = this.file.hhea.numberOfMetrics; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
+	      for (i = j = 0, ref = this.file.hhea.numberOfMetrics; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        this.metrics.push({
 	          advance: data.readUInt16(),
 	          lsb: data.readInt16()
@@ -32185,29 +32660,29 @@
 	      }
 	      lsbCount = this.file.maxp.numGlyphs - this.file.hhea.numberOfMetrics;
 	      this.leftSideBearings = (function() {
-	        var _j, _results;
-	        _results = [];
-	        for (i = _j = 0; 0 <= lsbCount ? _j < lsbCount : _j > lsbCount; i = 0 <= lsbCount ? ++_j : --_j) {
-	          _results.push(data.readInt16());
+	        var k, ref1, results;
+	        results = [];
+	        for (i = k = 0, ref1 = lsbCount; 0 <= ref1 ? k < ref1 : k > ref1; i = 0 <= ref1 ? ++k : --k) {
+	          results.push(data.readInt16());
 	        }
-	        return _results;
+	        return results;
 	      })();
 	      this.widths = (function() {
-	        var _j, _len, _ref1, _results;
-	        _ref1 = this.metrics;
-	        _results = [];
-	        for (_j = 0, _len = _ref1.length; _j < _len; _j++) {
-	          m = _ref1[_j];
-	          _results.push(m.advance);
+	        var k, len, ref1, results;
+	        ref1 = this.metrics;
+	        results = [];
+	        for (k = 0, len = ref1.length; k < len; k++) {
+	          m = ref1[k];
+	          results.push(m.advance);
 	        }
-	        return _results;
+	        return results;
 	      }).call(this);
 	      last = this.widths[this.widths.length - 1];
-	      _results = [];
-	      for (i = _j = 0; 0 <= lsbCount ? _j < lsbCount : _j > lsbCount; i = 0 <= lsbCount ? ++_j : --_j) {
-	        _results.push(this.widths.push(last));
+	      results = [];
+	      for (i = k = 0, ref1 = lsbCount; 0 <= ref1 ? k < ref1 : k > ref1; i = 0 <= ref1 ? ++k : --k) {
+	        results.push(this.widths.push(last));
 	      }
-	      return _results;
+	      return results;
 	    };
 
 	    HmtxTable.prototype.forGlyph = function(id) {
@@ -32222,10 +32697,10 @@
 	    };
 
 	    HmtxTable.prototype.encode = function(mapping) {
-	      var id, metric, table, _i, _len;
+	      var id, j, len, metric, table;
 	      table = new Data;
-	      for (_i = 0, _len = mapping.length; _i < _len; _i++) {
-	        id = mapping[_i];
+	      for (j = 0, len = mapping.length; j < len; j++) {
+	        id = mapping[j];
 	        metric = this.forGlyph(id);
 	        table.writeUInt16(metric.advance);
 	        table.writeUInt16(metric.lsb);
@@ -32243,21 +32718,21 @@
 
 
 /***/ },
-/* 81 */
+/* 83 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Data, HheaTable, Table,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  HheaTable = (function(_super) {
-	    __extends(HheaTable, _super);
+	  HheaTable = (function(superClass) {
+	    extend(HheaTable, superClass);
 
 	    function HheaTable() {
 	      return HheaTable.__super__.constructor.apply(this, arguments);
@@ -32284,7 +32759,7 @@
 	    };
 
 	    HheaTable.prototype.encode = function(ids) {
-	      var i, table, _i, _ref;
+	      var i, j, ref, table;
 	      table = new Data;
 	      table.writeInt(this.version);
 	      table.writeShort(this.ascender);
@@ -32297,7 +32772,7 @@
 	      table.writeShort(this.caretSlopeRise);
 	      table.writeShort(this.caretSlopeRun);
 	      table.writeShort(this.caretOffset);
-	      for (i = _i = 0, _ref = 4 * 2; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
+	      for (i = j = 0, ref = 4 * 2; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        table.writeByte(0);
 	      }
 	      table.writeShort(this.metricDataFormat);
@@ -32315,21 +32790,21 @@
 
 
 /***/ },
-/* 82 */
+/* 84 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Data, MaxpTable, Table,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  MaxpTable = (function(_super) {
-	    __extends(MaxpTable, _super);
+	  MaxpTable = (function(superClass) {
+	    extend(MaxpTable, superClass);
 
 	    function MaxpTable() {
 	      return MaxpTable.__super__.constructor.apply(this, arguments);
@@ -32387,23 +32862,23 @@
 
 
 /***/ },
-/* 83 */
+/* 85 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Data, PostTable, Table,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  PostTable = (function(_super) {
+	  PostTable = (function(superClass) {
 	    var POSTSCRIPT_GLYPHS;
 
-	    __extends(PostTable, _super);
+	    extend(PostTable, superClass);
 
 	    function PostTable() {
 	      return PostTable.__super__.constructor.apply(this, arguments);
@@ -32412,7 +32887,7 @@
 	    PostTable.prototype.tag = 'post';
 
 	    PostTable.prototype.parse = function(data) {
-	      var i, length, numberOfGlyphs, _i, _results;
+	      var i, j, length, numberOfGlyphs, ref, results;
 	      data.pos = this.offset;
 	      this.format = data.readInt();
 	      this.italicAngle = data.readInt();
@@ -32429,16 +32904,16 @@
 	        case 0x00020000:
 	          numberOfGlyphs = data.readUInt16();
 	          this.glyphNameIndex = [];
-	          for (i = _i = 0; 0 <= numberOfGlyphs ? _i < numberOfGlyphs : _i > numberOfGlyphs; i = 0 <= numberOfGlyphs ? ++_i : --_i) {
+	          for (i = j = 0, ref = numberOfGlyphs; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	            this.glyphNameIndex.push(data.readUInt16());
 	          }
 	          this.names = [];
-	          _results = [];
+	          results = [];
 	          while (data.pos < this.offset + this.length) {
 	            length = data.readByte();
-	            _results.push(this.names.push(data.readString(length)));
+	            results.push(this.names.push(data.readString(length)));
 	          }
-	          return _results;
+	          return results;
 	          break;
 	        case 0x00025000:
 	          numberOfGlyphs = data.readUInt16();
@@ -32447,12 +32922,12 @@
 	          break;
 	        case 0x00040000:
 	          return this.map = (function() {
-	            var _j, _ref, _results1;
-	            _results1 = [];
-	            for (i = _j = 0, _ref = this.file.maxp.numGlyphs; 0 <= _ref ? _j < _ref : _j > _ref; i = 0 <= _ref ? ++_j : --_j) {
-	              _results1.push(data.readUInt32());
+	            var k, ref1, results1;
+	            results1 = [];
+	            for (i = k = 0, ref1 = this.file.maxp.numGlyphs; 0 <= ref1 ? k < ref1 : k > ref1; i = 0 <= ref1 ? ++k : --k) {
+	              results1.push(data.readUInt32());
 	            }
-	            return _results1;
+	            return results1;
 	          }).call(this);
 	      }
 	    };
@@ -32480,7 +32955,7 @@
 	    };
 
 	    PostTable.prototype.encode = function(mapping) {
-	      var id, index, indexes, position, post, raw, string, strings, table, _i, _j, _k, _len, _len1, _len2;
+	      var id, index, indexes, j, k, l, len, len1, len2, position, post, raw, string, strings, table;
 	      if (!this.exists) {
 	        return null;
 	      }
@@ -32493,8 +32968,8 @@
 	      table.pos = 32;
 	      indexes = [];
 	      strings = [];
-	      for (_i = 0, _len = mapping.length; _i < _len; _i++) {
-	        id = mapping[_i];
+	      for (j = 0, len = mapping.length; j < len; j++) {
+	        id = mapping[j];
 	        post = this.glyphFor(id);
 	        position = POSTSCRIPT_GLYPHS.indexOf(post);
 	        if (position !== -1) {
@@ -32505,12 +32980,12 @@
 	        }
 	      }
 	      table.writeUInt16(Object.keys(mapping).length);
-	      for (_j = 0, _len1 = indexes.length; _j < _len1; _j++) {
-	        index = indexes[_j];
+	      for (k = 0, len1 = indexes.length; k < len1; k++) {
+	        index = indexes[k];
 	        table.writeUInt16(index);
 	      }
-	      for (_k = 0, _len2 = strings.length; _k < _len2; _k++) {
-	        string = strings[_k];
+	      for (l = 0, len2 = strings.length; l < len2; l++) {
+	        string = strings[l];
 	        table.writeByte(string.length);
 	        table.writeString(string);
 	      }
@@ -32529,19 +33004,19 @@
 
 
 /***/ },
-/* 84 */
+/* 86 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var OS2Table, Table,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  OS2Table = (function(_super) {
-	    __extends(OS2Table, _super);
+	  OS2Table = (function(superClass) {
+	    extend(OS2Table, superClass);
 
 	    function OS2Table() {
 	      return OS2Table.__super__.constructor.apply(this, arguments);
@@ -32569,20 +33044,20 @@
 	      this.yStrikeoutPosition = data.readShort();
 	      this.familyClass = data.readShort();
 	      this.panose = (function() {
-	        var _i, _results;
-	        _results = [];
-	        for (i = _i = 0; _i < 10; i = ++_i) {
-	          _results.push(data.readByte());
+	        var j, results;
+	        results = [];
+	        for (i = j = 0; j < 10; i = ++j) {
+	          results.push(data.readByte());
 	        }
-	        return _results;
+	        return results;
 	      })();
 	      this.charRange = (function() {
-	        var _i, _results;
-	        _results = [];
-	        for (i = _i = 0; _i < 4; i = ++_i) {
-	          _results.push(data.readInt());
+	        var j, results;
+	        results = [];
+	        for (i = j = 0; j < 4; i = ++j) {
+	          results.push(data.readInt());
 	        }
-	        return _results;
+	        return results;
 	      })();
 	      this.vendorID = data.readString(4);
 	      this.selection = data.readShort();
@@ -32595,12 +33070,12 @@
 	        this.winAscent = data.readShort();
 	        this.winDescent = data.readShort();
 	        this.codePageRange = (function() {
-	          var _i, _results;
-	          _results = [];
-	          for (i = _i = 0; _i < 2; i = ++_i) {
-	            _results.push(data.readInt());
+	          var j, results;
+	          results = [];
+	          for (i = j = 0; j < 2; i = ++j) {
+	            results.push(data.readInt());
 	          }
-	          return _results;
+	          return results;
 	        })();
 	        if (this.version > 1) {
 	          this.xHeight = data.readShort();
@@ -32626,21 +33101,21 @@
 
 
 /***/ },
-/* 85 */
+/* 87 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var Data, LocaTable, Table,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  LocaTable = (function(_super) {
-	    __extends(LocaTable, _super);
+	  LocaTable = (function(superClass) {
+	    extend(LocaTable, superClass);
 
 	    function LocaTable() {
 	      return LocaTable.__super__.constructor.apply(this, arguments);
@@ -32654,21 +33129,21 @@
 	      format = this.file.head.indexToLocFormat;
 	      if (format === 0) {
 	        return this.offsets = (function() {
-	          var _i, _ref, _results;
-	          _results = [];
-	          for (i = _i = 0, _ref = this.length; _i < _ref; i = _i += 2) {
-	            _results.push(data.readUInt16() * 2);
+	          var j, ref, results;
+	          results = [];
+	          for (i = j = 0, ref = this.length; j < ref; i = j += 2) {
+	            results.push(data.readUInt16() * 2);
 	          }
-	          return _results;
+	          return results;
 	        }).call(this);
 	      } else {
 	        return this.offsets = (function() {
-	          var _i, _ref, _results;
-	          _results = [];
-	          for (i = _i = 0, _ref = this.length; _i < _ref; i = _i += 4) {
-	            _results.push(data.readUInt32());
+	          var j, ref, results;
+	          results = [];
+	          for (i = j = 0, ref = this.length; j < ref; i = j += 4) {
+	            results.push(data.readUInt32());
 	          }
-	          return _results;
+	          return results;
 	        }).call(this);
 	      }
 	    };
@@ -32682,16 +33157,16 @@
 	    };
 
 	    LocaTable.prototype.encode = function(offsets) {
-	      var o, offset, ret, table, _i, _j, _k, _len, _len1, _len2, _ref;
+	      var j, k, l, len, len1, len2, o, offset, ref, ret, table;
 	      table = new Data;
-	      for (_i = 0, _len = offsets.length; _i < _len; _i++) {
-	        offset = offsets[_i];
+	      for (j = 0, len = offsets.length; j < len; j++) {
+	        offset = offsets[j];
 	        if (!(offset > 0xFFFF)) {
 	          continue;
 	        }
-	        _ref = this.offsets;
-	        for (_j = 0, _len1 = _ref.length; _j < _len1; _j++) {
-	          o = _ref[_j];
+	        ref = this.offsets;
+	        for (k = 0, len1 = ref.length; k < len1; k++) {
+	          o = ref[k];
 	          table.writeUInt32(o);
 	        }
 	        return ret = {
@@ -32699,8 +33174,8 @@
 	          table: table.data
 	        };
 	      }
-	      for (_k = 0, _len2 = offsets.length; _k < _len2; _k++) {
-	        o = offsets[_k];
+	      for (l = 0, len2 = offsets.length; l < len2; l++) {
+	        o = offsets[l];
 	        table.writeUInt16(o / 2);
 	      }
 	      return ret = {
@@ -32719,22 +33194,22 @@
 
 
 /***/ },
-/* 86 */
+/* 88 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var CompoundGlyph, Data, GlyfTable, SimpleGlyph, Table,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
-	    __slice = [].slice;
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty,
+	    slice = [].slice;
 
-	  Table = __webpack_require__(76);
+	  Table = __webpack_require__(78);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  GlyfTable = (function(_super) {
-	    __extends(GlyfTable, _super);
+	  GlyfTable = (function(superClass) {
+	    extend(GlyfTable, superClass);
 
 	    function GlyfTable() {
 	      return GlyfTable.__super__.constructor.apply(this, arguments);
@@ -32774,11 +33249,11 @@
 	    };
 
 	    GlyfTable.prototype.encode = function(glyphs, mapping, old2new) {
-	      var glyph, id, offsets, table, _i, _len;
+	      var glyph, id, j, len, offsets, table;
 	      table = [];
 	      offsets = [];
-	      for (_i = 0, _len = mapping.length; _i < _len; _i++) {
-	        id = mapping[_i];
+	      for (j = 0, len = mapping.length; j < len; j++) {
+	        id = mapping[j];
 	        glyph = glyphs[id];
 	        offsets.push(table.length);
 	        if (glyph) {
@@ -32797,13 +33272,13 @@
 	  })(Table);
 
 	  SimpleGlyph = (function() {
-	    function SimpleGlyph(raw, numberOfContours, xMin, yMin, xMax, yMax) {
-	      this.raw = raw;
-	      this.numberOfContours = numberOfContours;
-	      this.xMin = xMin;
-	      this.yMin = yMin;
-	      this.xMax = xMax;
-	      this.yMax = yMax;
+	    function SimpleGlyph(raw1, numberOfContours1, xMin1, yMin1, xMax1, yMax1) {
+	      this.raw = raw1;
+	      this.numberOfContours = numberOfContours1;
+	      this.xMin = xMin1;
+	      this.yMin = yMin1;
+	      this.xMax = xMax1;
+	      this.yMax = yMax1;
 	      this.compound = false;
 	    }
 
@@ -32830,13 +33305,13 @@
 
 	    WE_HAVE_INSTRUCTIONS = 0x0100;
 
-	    function CompoundGlyph(raw, xMin, yMin, xMax, yMax) {
+	    function CompoundGlyph(raw1, xMin1, yMin1, xMax1, yMax1) {
 	      var data, flags;
-	      this.raw = raw;
-	      this.xMin = xMin;
-	      this.yMin = yMin;
-	      this.xMax = xMax;
-	      this.yMax = yMax;
+	      this.raw = raw1;
+	      this.xMin = xMin1;
+	      this.yMin = yMin1;
+	      this.xMax = xMax1;
+	      this.yMax = yMax1;
 	      this.compound = true;
 	      this.glyphIDs = [];
 	      this.glyphOffsets = [];
@@ -32864,11 +33339,11 @@
 	    }
 
 	    CompoundGlyph.prototype.encode = function(mapping) {
-	      var i, id, result, _i, _len, _ref;
-	      result = new Data(__slice.call(this.raw.data));
-	      _ref = this.glyphIDs;
-	      for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-	        id = _ref[i];
+	      var i, id, j, len, ref, result;
+	      result = new Data(slice.call(this.raw.data));
+	      ref = this.glyphIDs;
+	      for (i = j = 0, len = ref.length; j < len; i = ++j) {
+	        id = ref[i];
 	        result.pos = this.glyphOffsets[i];
 	        result.writeShort(mapping[id]);
 	      }
@@ -32885,14 +33360,14 @@
 
 
 /***/ },
-/* 87 */
+/* 89 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var AFMFont, fs;
 
-	  fs = __webpack_require__(44);
+	  fs = __webpack_require__(43);
 
 	  AFMFont = (function() {
 	    var WIN_ANSI_MAP, characters;
@@ -32909,22 +33384,22 @@
 	      this.boundingBoxes = {};
 	      this.parse();
 	      this.charWidths = (function() {
-	        var _i, _results;
-	        _results = [];
-	        for (i = _i = 0; _i <= 255; i = ++_i) {
-	          _results.push(this.glyphWidths[characters[i]]);
+	        var j, results;
+	        results = [];
+	        for (i = j = 0; j <= 255; i = ++j) {
+	          results.push(this.glyphWidths[characters[i]]);
 	        }
-	        return _results;
+	        return results;
 	      }).call(this);
 	      this.bbox = (function() {
-	        var _i, _len, _ref, _results;
-	        _ref = this.attributes['FontBBox'].split(/\s+/);
-	        _results = [];
-	        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-	          e = _ref[_i];
-	          _results.push(+e);
+	        var j, len, ref, results;
+	        ref = this.attributes['FontBBox'].split(/\s+/);
+	        results = [];
+	        for (j = 0, len = ref.length; j < len; j++) {
+	          e = ref[j];
+	          results.push(+e);
 	        }
-	        return _results;
+	        return results;
 	      }).call(this);
 	      this.ascender = +(this.attributes['Ascender'] || 0);
 	      this.decender = +(this.attributes['Descender'] || 0);
@@ -32932,11 +33407,11 @@
 	    }
 
 	    AFMFont.prototype.parse = function() {
-	      var a, key, line, match, name, section, value, _i, _len, _ref;
+	      var a, j, key, len, line, match, name, ref, section, value;
 	      section = '';
-	      _ref = this.contents.split('\n');
-	      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-	        line = _ref[_i];
+	      ref = this.contents.split('\n');
+	      for (j = 0, len = ref.length; j < len; j++) {
+	        line = ref[j];
 	        if (match = line.match(/^Start(\w+)/)) {
 	          section = match[1];
 	          continue;
@@ -32999,9 +33474,9 @@
 	    };
 
 	    AFMFont.prototype.encodeText = function(text) {
-	      var char, i, string, _i, _ref;
+	      var char, i, j, ref, string;
 	      string = '';
-	      for (i = _i = 0, _ref = text.length; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
+	      for (i = j = 0, ref = text.length; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        char = text.charCodeAt(i);
 	        char = WIN_ANSI_MAP[char] || char;
 	        string += String.fromCharCode(char);
@@ -33029,17 +33504,17 @@
 
 
 /***/ },
-/* 88 */
+/* 90 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var CmapTable, Subset, utils,
-	    __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
+	    indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
-	  CmapTable = __webpack_require__(79);
+	  CmapTable = __webpack_require__(81);
 
-	  utils = __webpack_require__(77);
+	  utils = __webpack_require__(79);
 
 	  Subset = (function() {
 	    function Subset(font) {
@@ -33050,9 +33525,9 @@
 	    }
 
 	    Subset.prototype.use = function(character) {
-	      var i, _i, _ref;
+	      var i, j, ref;
 	      if (typeof character === 'string') {
-	        for (i = _i = 0, _ref = character.length; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
+	        for (i = j = 0, ref = character.length; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	          this.use(character.charCodeAt(i));
 	        }
 	        return;
@@ -33064,9 +33539,9 @@
 	    };
 
 	    Subset.prototype.encodeText = function(text) {
-	      var char, i, string, _i, _ref;
+	      var char, i, j, ref, string;
 	      string = '';
-	      for (i = _i = 0, _ref = text.length; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
+	      for (i = j = 0, ref = text.length; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
 	        char = this.unicodes[text.charCodeAt(i)];
 	        string += String.fromCharCode(char);
 	      }
@@ -33074,26 +33549,26 @@
 	    };
 
 	    Subset.prototype.generateCmap = function() {
-	      var mapping, roman, unicode, unicodeCmap, _ref;
+	      var mapping, ref, roman, unicode, unicodeCmap;
 	      unicodeCmap = this.font.cmap.tables[0].codeMap;
 	      mapping = {};
-	      _ref = this.subset;
-	      for (roman in _ref) {
-	        unicode = _ref[roman];
+	      ref = this.subset;
+	      for (roman in ref) {
+	        unicode = ref[roman];
 	        mapping[roman] = unicodeCmap[unicode];
 	      }
 	      return mapping;
 	    };
 
 	    Subset.prototype.glyphIDs = function() {
-	      var ret, roman, unicode, unicodeCmap, val, _ref;
+	      var ref, ret, roman, unicode, unicodeCmap, val;
 	      unicodeCmap = this.font.cmap.tables[0].codeMap;
 	      ret = [0];
-	      _ref = this.subset;
-	      for (roman in _ref) {
-	        unicode = _ref[roman];
+	      ref = this.subset;
+	      for (roman in ref) {
+	        unicode = ref[roman];
 	        val = unicodeCmap[unicode];
-	        if ((val != null) && __indexOf.call(ret, val) < 0) {
+	        if ((val != null) && indexOf.call(ret, val) < 0) {
 	          ret.push(val);
 	        }
 	      }
@@ -33101,10 +33576,10 @@
 	    };
 
 	    Subset.prototype.glyphsFor = function(glyphIDs) {
-	      var additionalIDs, glyph, glyphs, id, _i, _len, _ref;
+	      var additionalIDs, glyph, glyphs, id, j, len, ref;
 	      glyphs = {};
-	      for (_i = 0, _len = glyphIDs.length; _i < _len; _i++) {
-	        id = glyphIDs[_i];
+	      for (j = 0, len = glyphIDs.length; j < len; j++) {
+	        id = glyphIDs[j];
 	        glyphs[id] = this.font.glyf.glyphFor(id);
 	      }
 	      additionalIDs = [];
@@ -33115,9 +33590,9 @@
 	        }
 	      }
 	      if (additionalIDs.length > 0) {
-	        _ref = this.glyphsFor(additionalIDs);
-	        for (id in _ref) {
-	          glyph = _ref[id];
+	        ref = this.glyphsFor(additionalIDs);
+	        for (id in ref) {
+	          glyph = ref[id];
 	          glyphs[id] = glyph;
 	        }
 	      }
@@ -33125,15 +33600,15 @@
 	    };
 
 	    Subset.prototype.encode = function() {
-	      var cmap, code, glyf, glyphs, id, ids, loca, name, new2old, newIDs, nextGlyphID, old2new, oldID, oldIDs, tables, _ref, _ref1;
+	      var cmap, code, glyf, glyphs, id, ids, loca, name, new2old, newIDs, nextGlyphID, old2new, oldID, oldIDs, ref, ref1, tables;
 	      cmap = CmapTable.encode(this.generateCmap(), 'unicode');
 	      glyphs = this.glyphsFor(this.glyphIDs());
 	      old2new = {
 	        0: 0
 	      };
-	      _ref = cmap.charMap;
-	      for (code in _ref) {
-	        ids = _ref[code];
+	      ref = cmap.charMap;
+	      for (code in ref) {
+	        ids = ref[code];
 	        old2new[ids.old] = ids["new"];
 	      }
 	      nextGlyphID = cmap.maxGlyphID;
@@ -33147,22 +33622,22 @@
 	        return a - b;
 	      });
 	      oldIDs = (function() {
-	        var _i, _len, _results;
-	        _results = [];
-	        for (_i = 0, _len = newIDs.length; _i < _len; _i++) {
-	          id = newIDs[_i];
-	          _results.push(new2old[id]);
+	        var j, len, results;
+	        results = [];
+	        for (j = 0, len = newIDs.length; j < len; j++) {
+	          id = newIDs[j];
+	          results.push(new2old[id]);
 	        }
-	        return _results;
+	        return results;
 	      })();
 	      glyf = this.font.glyf.encode(glyphs, oldIDs, old2new);
 	      loca = this.font.loca.encode(glyf.offsets);
 	      name = this.font.name.encode();
 	      this.postscriptName = name.postscriptName;
 	      this.cmap = {};
-	      _ref1 = cmap.charMap;
-	      for (code in _ref1) {
-	        ids = _ref1[code];
+	      ref1 = cmap.charMap;
+	      for (code in ref1) {
+	        ids = ref1[code];
 	        this.cmap[code] = ids.old;
 	      }
 	      tables = {
@@ -33192,14 +33667,14 @@
 
 
 /***/ },
-/* 89 */
+/* 91 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var LineWrapper;
 
-	  LineWrapper = __webpack_require__(90);
+	  LineWrapper = __webpack_require__(92);
 
 	  module.exports = {
 	    initText: function() {
@@ -33226,7 +33701,7 @@
 	      return this;
 	    },
 	    _text: function(text, x, y, options, lineCallback) {
-	      var line, wrapper, _i, _len, _ref;
+	      var j, len, line, ref, wrapper;
 	      options = this._initOptions(x, y, options);
 	      text = '' + text;
 	      if (options.wordSpacing) {
@@ -33242,9 +33717,9 @@
 	        this._textOptions = options.continued ? options : null;
 	        wrapper.wrap(text, options);
 	      } else {
-	        _ref = text.split('\n');
-	        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-	          line = _ref[_i];
+	        ref = text.split('\n');
+	        for (j = 0, len = ref.length; j < len; j++) {
+	          line = ref[j];
 	          lineCallback(line, options);
 	        }
 	      }
@@ -33288,20 +33763,20 @@
 	      items = [];
 	      levels = [];
 	      flatten = function(list) {
-	        var i, item, _i, _len, _results;
-	        _results = [];
-	        for (i = _i = 0, _len = list.length; _i < _len; i = ++_i) {
+	        var i, item, j, len, results;
+	        results = [];
+	        for (i = j = 0, len = list.length; j < len; i = ++j) {
 	          item = list[i];
 	          if (Array.isArray(item)) {
 	            level++;
 	            flatten(item);
-	            _results.push(level--);
+	            results.push(level--);
 	          } else {
 	            items.push(item);
-	            _results.push(levels.push(level));
+	            results.push(levels.push(level));
 	          }
 	        }
-	        return _results;
+	        return results;
 	      };
 	      flatten(list);
 	      wrapper = new LineWrapper(this, options);
@@ -33341,7 +33816,7 @@
 	      return this;
 	    },
 	    _initOptions: function(x, y, options) {
-	      var key, margins, val, _ref;
+	      var key, margins, ref, val;
 	      if (x == null) {
 	        x = {};
 	      }
@@ -33362,9 +33837,9 @@
 	        return opts;
 	      })();
 	      if (this._textOptions) {
-	        _ref = this._textOptions;
-	        for (key in _ref) {
-	          val = _ref[key];
+	        ref = this._textOptions;
+	        for (key in ref) {
+	          val = ref[key];
 	          if (key !== 'continued') {
 	            if (options[key] == null) {
 	              options[key] = val;
@@ -33404,7 +33879,7 @@
 	      }
 	    },
 	    _fragment: function(text, x, y, options) {
-	      var align, characterSpacing, commands, d, encoded, i, lineWidth, lineY, mode, renderedWidth, spaceWidth, textWidth, word, wordSpacing, words, _base, _i, _len, _name;
+	      var align, base, characterSpacing, commands, d, encoded, i, j, len, lineWidth, lineY, mode, name, renderedWidth, spaceWidth, textWidth, word, wordSpacing, words;
 	      text = '' + text;
 	      if (text.length === 0) {
 	        return;
@@ -33452,35 +33927,35 @@
 	      this.save();
 	      this.transform(1, 0, 0, -1, 0, this.page.height);
 	      y = this.page.height - y - (this._font.ascender / 1000 * this._fontSize);
-	      if ((_base = this.page.fonts)[_name = this._font.id] == null) {
-	        _base[_name] = this._font.ref();
+	      if ((base = this.page.fonts)[name = this._font.id] == null) {
+	        base[name] = this._font.ref();
 	      }
 	      this._font.use(text);
 	      this.addContent("BT");
-	      this.addContent("" + x + " " + y + " Td");
+	      this.addContent(x + " " + y + " Td");
 	      this.addContent("/" + this._font.id + " " + this._fontSize + " Tf");
 	      mode = options.fill && options.stroke ? 2 : options.stroke ? 1 : 0;
 	      if (mode) {
-	        this.addContent("" + mode + " Tr");
+	        this.addContent(mode + " Tr");
 	      }
 	      if (characterSpacing) {
-	        this.addContent("" + characterSpacing + " Tc");
+	        this.addContent(characterSpacing + " Tc");
 	      }
 	      if (wordSpacing) {
 	        words = text.trim().split(/\s+/);
 	        wordSpacing += this.widthOfString(' ') + characterSpacing;
 	        wordSpacing *= 1000 / this._fontSize;
 	        commands = [];
-	        for (_i = 0, _len = words.length; _i < _len; _i++) {
-	          word = words[_i];
+	        for (j = 0, len = words.length; j < len; j++) {
+	          word = words[j];
 	          encoded = this._font.encode(word);
 	          encoded = ((function() {
-	            var _j, _ref, _results;
-	            _results = [];
-	            for (i = _j = 0, _ref = encoded.length; _j < _ref; i = _j += 1) {
-	              _results.push(encoded.charCodeAt(i).toString(16));
+	            var m, ref, results;
+	            results = [];
+	            for (i = m = 0, ref = encoded.length; m < ref; i = m += 1) {
+	              results.push(encoded.charCodeAt(i).toString(16));
 	            }
-	            return _results;
+	            return results;
 	          })()).join('');
 	          commands.push("<" + encoded + "> " + (-wordSpacing));
 	        }
@@ -33488,12 +33963,12 @@
 	      } else {
 	        encoded = this._font.encode(text);
 	        encoded = ((function() {
-	          var _j, _ref, _results;
-	          _results = [];
-	          for (i = _j = 0, _ref = encoded.length; _j < _ref; i = _j += 1) {
-	            _results.push(encoded.charCodeAt(i).toString(16));
+	          var m, ref, results;
+	          results = [];
+	          for (i = m = 0, ref = encoded.length; m < ref; i = m += 1) {
+	            results.push(encoded.charCodeAt(i).toString(16));
 	          }
-	          return _results;
+	          return results;
 	        })()).join('');
 	        this.addContent("<" + encoded + "> Tj");
 	      }
@@ -33506,30 +33981,30 @@
 
 
 /***/ },
-/* 90 */
+/* 92 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var EventEmitter, LineBreaker, LineWrapper,
-	    __hasProp = {}.hasOwnProperty,
-	    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+	    extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+	    hasProp = {}.hasOwnProperty;
 
 	  EventEmitter = __webpack_require__(26).EventEmitter;
 
-	  LineBreaker = __webpack_require__(91);
+	  LineBreaker = __webpack_require__(93);
 
-	  LineWrapper = (function(_super) {
-	    __extends(LineWrapper, _super);
+	  LineWrapper = (function(superClass) {
+	    extend(LineWrapper, superClass);
 
 	    function LineWrapper(document, options) {
-	      var _ref;
+	      var ref;
 	      this.document = document;
 	      this.indent = options.indent || 0;
 	      this.characterSpacing = options.characterSpacing || 0;
 	      this.wordSpacing = options.wordSpacing === 0;
 	      this.columns = options.columns || 1;
-	      this.columnGap = (_ref = options.columnGap) != null ? _ref : 18;
+	      this.columnGap = (ref = options.columnGap) != null ? ref : 18;
 	      this.lineWidth = (options.width - (this.columnGap * (this.columns - 1))) / this.columns;
 	      this.spaceLeft = this.lineWidth;
 	      this.startX = this.document.x;
@@ -33586,7 +34061,7 @@
 	      var bk, breaker, fbk, l, last, lbk, shouldContinue, w, word, wordWidths;
 	      breaker = new LineBreaker(text);
 	      last = null;
-	      wordWidths = {};
+	      wordWidths = Object.create(null);
 	      while (bk = breaker.nextBreak()) {
 	        word = text.slice((last != null ? last.position : void 0) || 0, bk.position);
 	        w = wordWidths[word] != null ? wordWidths[word] : wordWidths[word] = this.wordWidth(word);
@@ -33730,7 +34205,7 @@
 	    };
 
 	    LineWrapper.prototype.nextSection = function(options) {
-	      var _ref;
+	      var ref;
 	      this.emit('sectionEnd', options, this);
 	      if (++this.column > this.columns) {
 	        if (this.height != null) {
@@ -33742,7 +34217,7 @@
 	        this.maxY = this.document.page.maxY();
 	        this.document.x = this.startX;
 	        if (this.document._fillColor) {
-	          (_ref = this.document).fillColor.apply(_ref, this.document._fillColor);
+	          (ref = this.document).fillColor.apply(ref, this.document._fillColor);
 	        }
 	        this.emit('pageBreak', options, this);
 	      } else {
@@ -33764,20 +34239,20 @@
 
 
 /***/ },
-/* 91 */
+/* 93 */
 /***/ function(module, exports, __webpack_require__) {
 
 	// Generated by CoffeeScript 1.7.1
 	(function() {
 	  var AI, AL, BA, BK, CB, CI_BRK, CJ, CP_BRK, CR, DI_BRK, ID, IN_BRK, LF, LineBreaker, NL, NS, PR_BRK, SA, SG, SP, UnicodeTrie, WJ, XX, characterClasses, classTrie, pairTable, _ref, _ref1;
 
-	  UnicodeTrie = __webpack_require__(92);
+	  UnicodeTrie = __webpack_require__(94);
 
-	  classTrie = new UnicodeTrie(__webpack_require__(93));
+	  classTrie = new UnicodeTrie(__webpack_require__(95));
 
-	  _ref = __webpack_require__(94), BK = _ref.BK, CR = _ref.CR, LF = _ref.LF, NL = _ref.NL, CB = _ref.CB, BA = _ref.BA, SP = _ref.SP, WJ = _ref.WJ, SP = _ref.SP, BK = _ref.BK, LF = _ref.LF, NL = _ref.NL, AI = _ref.AI, AL = _ref.AL, SA = _ref.SA, SG = _ref.SG, XX = _ref.XX, CJ = _ref.CJ, ID = _ref.ID, NS = _ref.NS, characterClasses = _ref.characterClasses;
+	  _ref = __webpack_require__(96), BK = _ref.BK, CR = _ref.CR, LF = _ref.LF, NL = _ref.NL, CB = _ref.CB, BA = _ref.BA, SP = _ref.SP, WJ = _ref.WJ, SP = _ref.SP, BK = _ref.BK, LF = _ref.LF, NL = _ref.NL, AI = _ref.AI, AL = _ref.AL, SA = _ref.SA, SG = _ref.SG, XX = _ref.XX, CJ = _ref.CJ, ID = _ref.ID, NS = _ref.NS, characterClasses = _ref.characterClasses;
 
-	  _ref1 = __webpack_require__(95), DI_BRK = _ref1.DI_BRK, IN_BRK = _ref1.IN_BRK, CI_BRK = _ref1.CI_BRK, CP_BRK = _ref1.CP_BRK, PR_BRK = _ref1.PR_BRK, pairTable = _ref1.pairTable;
+	  _ref1 = __webpack_require__(97), DI_BRK = _ref1.DI_BRK, IN_BRK = _ref1.IN_BRK, CI_BRK = _ref1.CI_BRK, CP_BRK = _ref1.CP_BRK, PR_BRK = _ref1.PR_BRK, pairTable = _ref1.pairTable;
 
 	  LineBreaker = (function() {
 	    var Break, mapClass, mapFirst;
@@ -33925,7 +34400,7 @@
 
 
 /***/ },
-/* 92 */
+/* 94 */
 /***/ function(module, exports) {
 
 	// Generated by CoffeeScript 1.7.1
@@ -34017,7 +34492,7 @@
 
 
 /***/ },
-/* 93 */
+/* 95 */
 /***/ function(module, exports) {
 
 	module.exports = {
@@ -66644,7 +67119,7 @@
 	};
 
 /***/ },
-/* 94 */
+/* 96 */
 /***/ function(module, exports) {
 
 	// Generated by CoffeeScript 1.7.1
@@ -66735,7 +67210,7 @@
 
 
 /***/ },
-/* 95 */
+/* 97 */
 /***/ function(module, exports) {
 
 	// Generated by CoffeeScript 1.7.1
@@ -66758,14 +67233,14 @@
 
 
 /***/ },
-/* 96 */
+/* 98 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.7.1
+	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var PDFImage;
 
-	  PDFImage = __webpack_require__(97);
+	  PDFImage = __webpack_require__(99);
 
 	  module.exports = {
 	    initImages: function() {
@@ -66773,7 +67248,7 @@
 	      return this._imageCount = 0;
 	    },
 	    image: function(src, x, y, options) {
-	      var bh, bp, bw, h, hp, image, ip, w, wp, _base, _name, _ref, _ref1, _ref2;
+	      var base, bh, bp, bw, h, hp, image, ip, name, ref, ref1, ref2, w, wp;
 	      if (options == null) {
 	        options = {};
 	      }
@@ -66781,8 +67256,8 @@
 	        options = x;
 	        x = null;
 	      }
-	      x = (_ref = x != null ? x : options.x) != null ? _ref : this.x;
-	      y = (_ref1 = y != null ? y : options.y) != null ? _ref1 : this.y;
+	      x = (ref = x != null ? x : options.x) != null ? ref : this.x;
+	      y = (ref1 = y != null ? y : options.y) != null ? ref1 : this.y;
 	      if (!Buffer.isBuffer(src)) {
 	        image = this._imageRegistry[src];
 	      }
@@ -66793,8 +67268,8 @@
 	          this._imageRegistry[src] = image;
 	        }
 	      }
-	      if ((_base = this.page.xobjects)[_name = image.label] == null) {
-	        _base[_name] = image.obj;
+	      if ((base = this.page.xobjects)[name = image.label] == null) {
+	        base[name] = image.obj;
 	      }
 	      w = options.width || image.width;
 	      h = options.height || image.height;
@@ -66810,7 +67285,7 @@
 	        w = image.width * options.scale;
 	        h = image.height * options.scale;
 	      } else if (options.fit) {
-	        _ref2 = options.fit, bw = _ref2[0], bh = _ref2[1];
+	        ref2 = options.fit, bw = ref2[0], bh = ref2[1];
 	        bp = bw / bh;
 	        ip = image.width / image.height;
 	        if (ip > bp) {
@@ -66847,10 +67322,10 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer))
 
 /***/ },
-/* 97 */
+/* 99 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.7.1
+	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.10.0
 
 	/*
 	PDFImage - embeds images in PDF documents
@@ -66860,13 +67335,13 @@
 	(function() {
 	  var Data, JPEG, PDFImage, PNG, fs;
 
-	  fs = __webpack_require__(44);
+	  fs = __webpack_require__(43);
 
-	  Data = __webpack_require__(72);
+	  Data = __webpack_require__(74);
 
-	  JPEG = __webpack_require__(98);
+	  JPEG = __webpack_require__(100);
 
-	  PNG = __webpack_require__(99);
+	  PNG = __webpack_require__(101);
 
 	  PDFImage = (function() {
 	    function PDFImage() {}
@@ -66875,6 +67350,8 @@
 	      var data, match;
 	      if (Buffer.isBuffer(src)) {
 	        data = src;
+	      } else if (src instanceof ArrayBuffer) {
+	        data = new Buffer(new Uint8Array(src));
 	      } else {
 	        if (match = /^data:.+;base64,(.*)$/.exec(src)) {
 	          data = new Buffer(match[1], 'base64');
@@ -66905,15 +67382,15 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer))
 
 /***/ },
-/* 98 */
+/* 100 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var JPEG, fs,
-	    __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
+	    indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
-	  fs = __webpack_require__(44);
+	  fs = __webpack_require__(43);
 
 	  JPEG = (function() {
 	    var MARKERS;
@@ -66931,12 +67408,12 @@
 	      while (pos < this.data.length) {
 	        marker = this.data.readUInt16BE(pos);
 	        pos += 2;
-	        if (__indexOf.call(MARKERS, marker) >= 0) {
+	        if (indexOf.call(MARKERS, marker) >= 0) {
 	          break;
 	        }
 	        pos += this.data.readUInt16BE(pos);
 	      }
-	      if (__indexOf.call(MARKERS, marker) < 0) {
+	      if (indexOf.call(MARKERS, marker) < 0) {
 	        throw "Invalid JPEG.";
 	      }
 	      pos += 2;
@@ -66989,16 +67466,16 @@
 
 
 /***/ },
-/* 99 */
+/* 101 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.7.1
+	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.10.0
 	(function() {
 	  var PNG, PNGImage, zlib;
 
 	  zlib = __webpack_require__(47);
 
-	  PNG = __webpack_require__(100);
+	  PNG = __webpack_require__(102);
 
 	  PNGImage = (function() {
 	    function PNGImage(data, label) {
@@ -67011,12 +67488,12 @@
 	    }
 
 	    PNGImage.prototype.embed = function(document) {
-	      var mask, palette, params, rgb, val, x, _i, _len;
+	      var k, len1, mask, palette, params, rgb, val, x;
 	      this.document = document;
 	      if (this.obj) {
 	        return;
 	      }
-	      this.obj = document.ref({
+	      this.obj = this.document.ref({
 	        Type: 'XObject',
 	        Subtype: 'Image',
 	        BitsPerComponent: this.image.bits,
@@ -67025,7 +67502,7 @@
 	        Filter: 'FlateDecode'
 	      });
 	      if (!this.image.hasAlphaChannel) {
-	        params = document.ref({
+	        params = this.document.ref({
 	          Predictor: 15,
 	          Colors: this.image.colors,
 	          BitsPerComponent: this.image.bits,
@@ -67037,7 +67514,7 @@
 	      if (this.image.palette.length === 0) {
 	        this.obj.data['ColorSpace'] = this.image.colorSpace;
 	      } else {
-	        palette = document.ref();
+	        palette = this.document.ref();
 	        palette.end(new Buffer(this.image.palette));
 	        this.obj.data['ColorSpace'] = ['Indexed', 'DeviceRGB', (this.image.palette.length / 3) - 1, palette];
 	      }
@@ -67047,8 +67524,8 @@
 	      } else if (this.image.transparency.rgb) {
 	        rgb = this.image.transparency.rgb;
 	        mask = [];
-	        for (_i = 0, _len = rgb.length; _i < _len; _i++) {
-	          x = rgb[_i];
+	        for (k = 0, len1 = rgb.length; k < len1; k++) {
+	          x = rgb[k];
 	          mask.push(x, x);
 	        }
 	        return this.obj.data['Mask'] = mask;
@@ -67099,8 +67576,8 @@
 	            alphaChannel[a++] = pixels[i++];
 	          }
 	          done = 0;
-	          zlib.deflate(imgData, function(err, imgData) {
-	            _this.imgData = imgData;
+	          zlib.deflate(imgData, function(err, imgData1) {
+	            _this.imgData = imgData1;
 	            if (err) {
 	              throw err;
 	            }
@@ -67108,8 +67585,8 @@
 	              return _this.finalize();
 	            }
 	          });
-	          return zlib.deflate(alphaChannel, function(err, alphaChannel) {
-	            _this.alphaChannel = alphaChannel;
+	          return zlib.deflate(alphaChannel, function(err, alphaChannel1) {
+	            _this.alphaChannel = alphaChannel1;
 	            if (err) {
 	              throw err;
 	            }
@@ -67126,14 +67603,14 @@
 	      transparency = this.image.transparency.indexed;
 	      return this.image.decodePixels((function(_this) {
 	        return function(pixels) {
-	          var alphaChannel, i, j, _i, _ref;
+	          var alphaChannel, i, j, k, ref;
 	          alphaChannel = new Buffer(_this.width * _this.height);
 	          i = 0;
-	          for (j = _i = 0, _ref = pixels.length; _i < _ref; j = _i += 1) {
+	          for (j = k = 0, ref = pixels.length; k < ref; j = k += 1) {
 	            alphaChannel[i++] = transparency[pixels[j]];
 	          }
-	          return zlib.deflate(alphaChannel, function(err, alphaChannel) {
-	            _this.alphaChannel = alphaChannel;
+	          return zlib.deflate(alphaChannel, function(err, alphaChannel1) {
+	            _this.alphaChannel = alphaChannel1;
 	            if (err) {
 	              throw err;
 	            }
@@ -67154,7 +67631,7 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer))
 
 /***/ },
-/* 100 */
+/* 102 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.4.0
@@ -67183,7 +67660,7 @@
 	(function() {
 	  var PNG, fs, zlib;
 
-	  fs = __webpack_require__(44);
+	  fs = __webpack_require__(43);
 
 	  zlib = __webpack_require__(47);
 
@@ -67478,10 +67955,10 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer))
 
 /***/ },
-/* 101 */
+/* 103 */
 /***/ function(module, exports) {
 
-	// Generated by CoffeeScript 1.7.1
+	// Generated by CoffeeScript 1.10.0
 	(function() {
 	  module.exports = {
 	    annotate: function(x, y, w, h, options) {
@@ -67532,11 +68009,11 @@
 	      return this.annotate(x, y, w, h, options);
 	    },
 	    _markup: function(x, y, w, h, options) {
-	      var x1, x2, y1, y2, _ref;
+	      var ref1, x1, x2, y1, y2;
 	      if (options == null) {
 	        options = {};
 	      }
-	      _ref = this._convertRect(x, y, w, h), x1 = _ref[0], y1 = _ref[1], x2 = _ref[2], y2 = _ref[3];
+	      ref1 = this._convertRect(x, y, w, h), x1 = ref1[0], y1 = ref1[1], x2 = ref1[2], y2 = ref1[3];
 	      options.QuadPoints = [x1, y2, x2, y2, x1, y1, x2, y1];
 	      options.Contents = new String;
 	      return this.annotate(x, y, w, h, options);
@@ -67600,11 +68077,11 @@
 	      return this.annotate(x, y, w, h, options);
 	    },
 	    _convertRect: function(x1, y1, w, h) {
-	      var m0, m1, m2, m3, m4, m5, x2, y2, _ref;
+	      var m0, m1, m2, m3, m4, m5, ref1, x2, y2;
 	      y2 = y1;
 	      y1 += h;
 	      x2 = x1 + w;
-	      _ref = this._ctm, m0 = _ref[0], m1 = _ref[1], m2 = _ref[2], m3 = _ref[3], m4 = _ref[4], m5 = _ref[5];
+	      ref1 = this._ctm, m0 = ref1[0], m1 = ref1[1], m2 = ref1[2], m3 = ref1[3], m4 = ref1[4], m5 = ref1[5];
 	      x1 = m0 * x1 + m2 * y1 + m4;
 	      y1 = m1 * x1 + m3 * y1 + m5;
 	      x2 = m0 * x2 + m2 * y2 + m4;
@@ -67617,7 +68094,107 @@
 
 
 /***/ },
-/* 102 */
+/* 104 */
+/***/ function(module, exports, __webpack_require__) {
+
+	/* WEBPACK VAR INJECTION */(function(Buffer) {// Generated by CoffeeScript 1.10.0
+	(function() {
+	  var fs, sRGB_IEC61966_ICC_PROFILE;
+
+	  fs = __webpack_require__(43);
+
+	  module.exports = {
+	    initPdfa: function() {
+	      return this._uuid = null;
+	    },
+	    pdfaMetadata: function() {
+	      var ref;
+	      ref = this.ref({
+	        Type: 'Metadata',
+	        Subtype: 'XML'
+	      }, {
+	        compress: false
+	      });
+	      ref.write(this.pdfaXMP());
+	      return ref;
+	    },
+	    pdfaOutputIntents: function() {
+	      var ref;
+	      ref = this.ref({
+	        Type: 'OutputIntent',
+	        S: 'GTS_PDFA1',
+	        Info: new String('sRGB IEC61966-2.1'),
+	        OutputConditionIdentifier: new String('sRGB IEC61966-2.1'),
+	        DestOutputProfile: this.destOutputProfile()
+	      });
+	      return [ref];
+	    },
+	    destOutputProfile: function() {
+	      var ref;
+	      ref = this.ref({
+	        N: 3
+	      });
+	      ref.write(sRGB_IEC61966_ICC_PROFILE());
+	      return ref;
+	    },
+	    pdfaXMP: function() {
+	      var s;
+	      s = '<?xpacket begin="\xEF\xBB\xBF" id="W5M0MpCehiHzreSzNTczkc9d"?>' + "\n";
+	      s += '  <x:xmpmeta xmlns:x="adobe:ns:meta/">' + "\n";
+	      s += '    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' + "\n";
+	      s += '      <rdf:Description rdf:about="uuid:' + this.fileIdentifier() + '" xmlns:pdf="http://ns.adobe.com/pdf/1.3/">' + "\n";
+	      s += '        <pdf:Producer>' + this.info.Producer + '</pdf:Producer>' + "\n";
+	      if (this.info.Keywords) {
+	        s += '        <pdf:Keywords>' + this.info.Keywords + '</pdf:Keywords>' + "\n";
+	      }
+	      s += '      </rdf:Description>' + "\n";
+	      s += '      <rdf:Description rdf:about="uuid:' + this.fileIdentifier() + '" xmlns:xmp="http://ns.adobe.com/xap/1.0/">' + "\n";
+	      s += '        <xmp:CreateDate>' + this.info.CreationDate.toISOString() + '</xmp:CreateDate>' + "\n";
+	      s += '        <xmp:ModifyDate>' + this.info.CreationDate.toISOString() + '</xmp:ModifyDate>' + "\n";
+	      s += '        <xmp:MetadataDate>' + this.info.CreationDate.toISOString() + '</xmp:MetadataDate>' + "\n";
+	      s += '        <xmp:CreatorTool>' + this.info.Creator + '</xmp:CreatorTool>' + "\n";
+	      s += '      </rdf:Description>' + "\n";
+	      s += '      <rdf:Description rdf:about="uuid:' + this.fileIdentifier() + '" xmlns:dc="http://purl.org/dc/elements/1.1/">' + "\n";
+	      if (this.info.Title) {
+	        s += '        <dc:title><rdf:Alt><rdf:li xml:lang="x-default">' + this.info.Title + '</rdf:li></rdf:Alt></dc:title>' + "\n";
+	      }
+	      if (this.info.Subject) {
+	        s += '        <dc:subject><rdf:Bag><rdf:li>' + this.info.Subject + '</rdf:li></rdf:Bag></dc:subject>' + "\n";
+	      }
+	      if (this.info.Author) {
+	        s += '        <dc:creator><rdf:Seq><rdf:li>' + this.info.Author + '</rdf:li></rdf:Seq></dc:creator>' + "\n";
+	      }
+	      s += '      </rdf:Description>' + "\n";
+	      s += '      <rdf:Description rdf:about="uuid:' + this.fileIdentifier() + '" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" >' + "\n";
+	      s += '        <pdfaid:part>3</pdfaid:part>' + "\n";
+	      s += '        <pdfaid:conformance>B</pdfaid:conformance>' + "\n";
+	      s += '      </rdf:Description>' + "\n";
+	      s += '      <rdf:Description rdf:about="uuid:' + this.fileIdentifier() + '" xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/">' + "\n";
+	      s += '        <xmpMM:DocumentID>uuid:' + this.fileIdentifier() + '</xmpMM:DocumentID>' + "\n";
+	      s += '      </rdf:Description>' + "\n";
+	      if (this.options.pdfaAdditionalXmpRdf) {
+	        s += this.addRdfAbout(this.options.pdfaAdditionalXmpRdf) + "\n";
+	      }
+	      s += '    </rdf:RDF>' + "\n";
+	      s += '  </x:xmpmeta>' + "\n";
+	      s += '<?xpacket end="w"?>';
+	      return s;
+	    },
+	    addRdfAbout: function(rdf) {
+	      return rdf.replace(/\<rdf:Description/g, '<rdf:Description rdf:about="uuid:' + this.fileIdentifier() + '"');
+	    }
+	  };
+
+	  sRGB_IEC61966_ICC_PROFILE = function() {
+	    return Buffer("AAAL7AAAAAACAAAAbW50clJHQiBYWVogB9kAAwAbABUAJQAtYWNzcAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAEAAPbWAAEAAAAA0y0AAAAAyVvWN+ldijsN84+ZwTIDiQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQZGVzYwAAAUQAAAB9YlhZWgAAAcQAAAAUYlRSQwAAAdgAAAgMZG1kZAAACeQAAACIZ1hZWgAACmwAAAAUZ1RSQwAAAdgAAAgMbHVtaQAACoAAAAAUbWVhcwAACpQAAAAkYmtwdAAACrgAAAAUclhZWgAACswAAAAUclRSQwAAAdgAAAgMdGVjaAAACuAAAAAMdnVlZAAACuwAAACHd3RwdAAAC3QAAAAUY3BydAAAC4gAAAA3Y2hhZAAAC8AAAAAsZGVzYwAAAAAAAAAjc1JHQiBJRUM2MTk2Ni0yLTEgbm8gYmxhY2sgc2NhbGluZwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYWVogAAAAAAAAJKAAAA+EAAC2z2N1cnYAAAAAAAAEAAMzAzgDPQNCA0cDTANRA1YDWwNgA2UDaQNtA3IDdwN8A4EDhgOLA5ADlQOaA58DpAOpA64DswO4A7wDwQPGA8sD0APVA9oD3wPjA+gD7QPyA/cD/AQBBAYECwQQBBUEGwQgBCYEKwQxBDcEPQRDBEkETwRVBFoEYQRnBG0EdAR7BIEEiASPBJYEnQSkBKoEsQS5BMAEyATPBNcE3wTnBO8E9gT+BQYFDgUWBR8FJwUwBTkFQQVJBVIFWwVkBW0FdwWABYkFkgWcBaUFrwW5BcMFzQXXBeEF6wX1Bf8GCgYVBh8GKgY0Bj8GSgZWBmEGbAZ4BoIGjgaaBqYGsga+BsoG1QbhBu4G+gcHBxMHHwcsBzkHRgdTB2EHbQd6B4gHlgejB7EHvgfMB9oH6Af3CAUIEwghCDAIPwhOCFwIawh6CIkImQinCLcIxwjWCOYI9gkFCRYJJgk2CUcJVglnCXgJiQmZCaoJuwnNCd4J7goAChIKJAo1CkcKWQprCn0KjwqhCrQKxwrZCuwK/wsSCyQLOAtLC18LcguGC5oLrgvBC9UL6Qv+DBEMJgw7DFAMZAx5DI4MpAy4DM4M4wz5DQ4NJA06DU8NZg18DZMNqQ2/DdYN7A4DDhsOMg5IDmAOeA6ODqYOvg7VDu4PBg8fDzYPTw9oD4APmQ+yD8oP4w/9EBYQLxBJEGIQfBCWELAQyhDlEP4RGRE0EU4RaRGEEZ8RuhHWEfESDBIoEkMSYBJ8EpcStBLQEuwTCRMmE0ITYBN8E5kTtxPUE/IUEBQtFEsUaBSHFKUUwxTiFQAVHxU+FVwVfBWbFboV2hX5FhkWORZYFngWmBa5FtkW+RcaFzsXXBd8F54XvxfgGAIYIxhFGGcYiRirGM0Y8BkSGTUZVxl6GZ0ZwBnkGgYaKhpNGnEalRq5Gt0bARsmG0obbxuTG7kb3RwDHCccTRxyHJgcvRzkHQkdMB1WHXwdox3JHfEeFx4/HmUejR60HtwfAx8rH1Mfex+jH8wf9CAcIEUgbiCXIL8g6SESITwhZSGPIbkh4yINIjgiYiKNIrci4iMNIzcjYyOOI7oj5SQRJD0kaSSVJMEk7SUaJUclcyWhJc0l+iYoJlUmgyawJt8nDCc6J2knlyfGJ/QoIyhSKIEosSjgKQ8pPyluKZ8pzin+Ki8qXyqQKsAq8SsjK1MrhSu2K+csGixLLH0sryzhLRMtRi15Lawt3y4RLkUueC6rLt8vEy9GL3svry/jMBgwTDCBMLYw6zEgMVUxizHAMfYyLDJhMpgyzjMEMzwzcjOoM980FzRONIU0vTT1NSw1ZTWdNdU2DTZGNn42tzbxNyk3YjecN9Y4DzhJOIM4vTj3OTI5bDmnOeI6HTpYOpQ6zzsKO0U7gju+O/o8NjxzPK887D0pPWY9oz3gPh4+Wz6aPtc/FT9TP5I/0EAPQE1AjEDMQQtBSkGKQclCCkJJQolCyUMKQ0tDjEPMRA1ETkSPRNFFE0VURZZF2EYaRl1GoEbiRyVHaEeqR+5IMkh1SLlI/ElASYRJyUoOSlJKl0rcSyFLZkurS/BMN0x9TMJNCE1PTZVN204iTmlOsU74Tz9Phk/OUBZQXlCmUO5RNlF+UchSEVJaUqNS7FM2U39TyVQTVF1Up1TxVTxVh1XRVhxWaFa0Vv9XS1eXV+NYL1h7WMdZFFlgWa1Z+lpIWpVa4lswW35bzFwaXGhct10FXVRdo13yXkFekV7gXzBfgF/QYCBgcWDBYRJhY2G0YgViVmKoYvljS2OdY+9kQmSUZOdlOWWMZd5mMmaFZtlnLGeAZ9RoKWh9aNJpJml7adBqJWp7as9rJWt7a9FsJ2x9bNRtK22CbdluMG6Gbt5vNW+Nb+VwPXCVcO5xRnGecfdyUXKqcwNzXXO3dBB0anTEdR91eXXUdi92iXbkd0B3m3f3eFN4r3kLeWd5xHogen162Xs3e5R78nxQfK59C31pfcd+Jn6FfuN/Qn+hgAGAYIC/gR+Bf4Hggj+CoIMAg2GDw4QjhISE5oVIhamGC4ZthtCHMoeUh/eIW4i9iSCJhInoikuKr4sUi3iL3IxBjKaNC41vjdWOO46gjwaPbI/RkDiQn5EGkWyR05I6kqGTCZNxk9iUQJSplRGVeZXilkuWtJcdl4eX8JhamMSZLZmYmgOabZrYm0KbrZwZnISc8J1cnceeNJ6gnwyfeZ/loFOgwKEtoZuiCKJ2ouSjUqPBpDCknqUNpXul66ZbpsqnOqepqBqoiaj6qWup26pNqr2rL6ugrBKshKz2rWit2q5Nrr+vM6+lsBmwjLEAsXSx57JcstCzRLO5tC60orUYtY22A7Z4tu63ZLfauFC4x7k+ubW6LLqjuxq7k7wKvIK8+r1zveu+ZL7dv1a/z8BIwMLBO8G2wi/CqsMkw5/EGsSVxRDFi8YHxoLG/8d6x/fIc8jvyW3J6cpnyuTLYsvfzF3M281ZzdjOVs7Vz1TP09BT0NLRUdHS0lLS0dNS09PUVNTV1VXV19ZY1trXXNfe2GDY49ll2efaa9ru23Hb9dx43PvdgN4E3ojfDd+S4BbgnOEh4abiLeKy4zjjv+RF5MvlUuXZ5mDm5+dv5/fofukG6Y/qF+qg6ynrsuw77MTtTu3X7mHu6+928ADwivEV8aHyLPK380LzzvRa9Ob1cvX+9oz3GPel+DL4v/lO+dv6afr3+4b8FPyj/TL9wf5Q/uD/b///ZGVzYwAAAAAAAAAuSUVDIDYxOTY2LTItMSBEZWZhdWx0IFJHQiBDb2xvdXIgU3BhY2UgLSBzUkdCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAAAAAAFAAAAAAAABtZWFzAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJYWVogAAAAAAAAAxYAAAMzAAACpFhZWiAAAAAAAABvogAAOPUAAAOQc2lnIAAAAABDUlQgZGVzYwAAAAAAAAAtUmVmZXJlbmNlIFZpZXdpbmcgQ29uZGl0aW9uIGluIElFQyA2MTk2Ni0yLTEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFhZWiAAAAAAAAD21gABAAAAANMtdGV4dAAAAABDb3B5cmlnaHQgSW50ZXJuYXRpb25hbCBDb2xvciBDb25zb3J0aXVtLCAyMDA5AABzZjMyAAAAAAABDEQAAAXf///zJgAAB5QAAP2P///7of///aIAAAPbAADAdQ==", "base64");
+	  };
+
+	}).call(this);
+
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer))
+
+/***/ },
+/* 105 */
 /***/ function(module, exports) {
 
 	module.exports = {
@@ -67675,14 +68252,14 @@
 
 
 /***/ },
-/* 103 */
+/* 106 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(Buffer) {/* jslint node: true */
 	'use strict';
 
 	var pdfKit = __webpack_require__(24);
-	var PDFImage = __webpack_require__(97);
+	var PDFImage = __webpack_require__(99);
 
 	function ImageMeasure(pdfDoc, imageDictionary) {
 		this.pdfDoc = pdfDoc;
@@ -67723,7 +68300,7 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(2).Buffer))
 
 /***/ },
-/* 104 */
+/* 107 */
 /***/ function(module, exports) {
 
 	/* jslint node: true */
@@ -67876,7 +68453,7 @@
 	};
 
 /***/ },
-/* 105 */
+/* 108 */
 /***/ function(module, exports, __webpack_require__) {
 
 	var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/* FileSaver.js
@@ -68130,7 +68707,7 @@
 
 	if (typeof module !== "undefined" && module.exports) {
 	  module.exports.saveAs = saveAs;
-	} else if (("function" !== "undefined" && __webpack_require__(106) !== null) && (__webpack_require__(107) != null)) {
+	} else if (("function" !== "undefined" && __webpack_require__(109) !== null) && (__webpack_require__(110) != null)) {
 	  !(__WEBPACK_AMD_DEFINE_ARRAY__ = [], __WEBPACK_AMD_DEFINE_RESULT__ = function() {
 	    return saveAs;
 	  }.apply(exports, __WEBPACK_AMD_DEFINE_ARRAY__), __WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__));
@@ -68138,14 +68715,14 @@
 
 
 /***/ },
-/* 106 */
+/* 109 */
 /***/ function(module, exports) {
 
 	module.exports = function() { throw new Error("define cannot be used indirect"); };
 
 
 /***/ },
-/* 107 */
+/* 110 */
 /***/ function(module, exports) {
 
 	/* WEBPACK VAR INJECTION */(function(__webpack_amd_options__) {module.exports = __webpack_amd_options__;

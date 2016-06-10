@@ -84,13 +84,14 @@ PdfPrinter.prototype.createPdfKitDocument = function(docDefinition, options) {
 	options = options || {};
 
 	var pageSize = pageSize2widthAndHeight(docDefinition.pageSize || 'a4');
+  var pdfKitOptions = _.assign(docDefinition.pdfKit || {}, { size: [ pageSize.width, pageSize.height ] });
 
   if(docDefinition.pageOrientation === 'landscape') {
     pageSize = { width: pageSize.height, height: pageSize.width};
   }
 	pageSize.orientation = docDefinition.pageOrientation === 'landscape' ? docDefinition.pageOrientation : 'portrait';
 
-	this.pdfKitDoc = new PdfKit({ size: [ pageSize.width, pageSize.height ], compress: false});
+	this.pdfKitDoc = new PdfKit(pdfKitOptions);
 	this.pdfKitDoc.info.Producer = 'pdfmake';
 	this.pdfKitDoc.info.Creator = 'pdfmake';
 	
